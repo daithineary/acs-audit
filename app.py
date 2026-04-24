@@ -5,7 +5,27 @@ import gspread
 
 #To run app put this into terminal : streamlit run app.py
 
+def check_password():
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
 
+    if st.session_state.authenticated:
+        return True
+
+    password = st.text_input("Enter password", type="password")
+
+    if st.button("Log in"):
+        if password == st.secrets["app_password"]:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password")
+
+    return False
+
+
+if not check_password():
+    st.stop()
 # =========================
 # Config
 # =========================
