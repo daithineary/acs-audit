@@ -184,14 +184,12 @@ def render_header() -> None:
     st.markdown(
         """
         <style>
-            .block-container {
-                max-width: 95%;
-                padding-top: 1.25rem;
-                padding-bottom: 1.25rem;
-            }
+        .block-container {
+            padding-top: 3rem;
+        }
         </style>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_html=True
     )
 
 
