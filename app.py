@@ -53,7 +53,7 @@ ALL_TIMED_ITEMS = [item for section in SECTIONS.values() for item in section]
 
 @st.cache_resource
 def get_sheet():
-    gc = gspread.service_account(filename="credentials.json")
+    gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
     sh = gc.open("ACS Audit")
     return sh.sheet1
 
