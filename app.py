@@ -177,12 +177,12 @@ def sync_interventions_to_admission() -> None:
 # =========================
 def render_header() -> None:
     st.set_page_config(page_title=APP_TITLE, layout="wide")
-    if st.session_state.get("submitted"):
-        st.success("✅ Submitted successfully")
-        st.session_state["submitted"] = False
     st.title(APP_TITLE)
     st.caption("Record timings of key ACS interventions relative to admission time.")
     st.caption("Live saving to Google Sheets.")
+    if st.session_state.get("submitted"):
+        st.success("✅ Submitted successfully")
+        st.session_state["submitted"] = False
 
     st.markdown(
         """
