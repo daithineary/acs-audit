@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 import gspread
 
 
@@ -145,7 +145,7 @@ def reset_form_state() -> None:
     st.session_state["admission_datetime"] = now
     st.session_state["discharge_datetime"] = now
 
-    st.session_state["age_years"] = 0
+    st.session_state["date_of_birth"] = date(2015, 1, 1)
     st.session_state["sex"] = "Unknown"
     st.session_state["genotype"] = "Unknown"
     st.session_state["genotype_other"] = ""
@@ -217,7 +217,17 @@ def serialise_multiselect(values):
         return ""
     return "; ".join(values)
 
+def calculate_age_years(dob, admission_dt):
+    if dob is None or admission_dt is None:
+        return None
 
+    admission_date = admission_dt.date()
+    age = admission_date.year - dob.year
+
+    if (admission_date.month, admission_date.day) < (dob.month, dob.day):
+        age -= 1
+
+    return age
 # =========================
 # Session state helpers
 # =========================
@@ -236,7 +246,7 @@ def initialise_state() -> None:
         st.session_state["reset_requested"] = False
 
     defaults = {
-        "age_years": 0,
+        "date_of_birth": date(2015, 1, 1),
         "sex": "Unknown",
         "genotype": "Unknown",
         "genotype_other": "",
@@ -343,13 +353,19 @@ def render_background_section() -> dict:
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        values["age_years"] = st.number_input(
-            "Age (years)",
-            min_value=0,
-            max_value=25,
-            step=1,
-            key="age_years",
+        values["date_of_birth"] = st.date_input(
+            "Date of Birth",
+            key="date_of_birth",
+            min_value=date(1990, 1, 1),
+            max_value=date.today(),
         )
+
+        values["age_years"] = calculate_age_years(
+            values["date_of_birth"],
+            st.session_state["admission_datetime"],
+        )
+
+        st.caption(f"Calculated age at admission: {values['age_years']} years")
 
     with col2:
         values["sex"] = st.selectbox(
