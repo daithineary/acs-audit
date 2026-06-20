@@ -120,10 +120,10 @@ SECTIONS = {
         {"label": "VBG", "key": "vbg"},
     ],
     "Treatment": [
-        {"label": "Oxygen", "key": "oxygen"},
         {"label": "Analgesia", "key": "analgesia"},
         {"label": "Steroids", "key": "steroids"},
         {"label": "Antibiotics", "key": "antibiotics"},
+        {"label": "Oxygen", "key": "oxygen"},
         {"label": "Fluids", "key": "fluids"},
         {"label": "Bronchodilators", "key": "bronchodilators"},
         {"label": "Simple Transfusion", "key": "simple_transfusion"},
@@ -219,7 +219,7 @@ def reset_form_state() -> None:
         key = item["key"]
         st.session_state[f"{key}_day"] = 0
         st.session_state[f"{key}_time"] = now.time()
-        st.session_state[f"{key}_not_done"] = False
+        st.session_state[f"{key}_performed"] = False
 
     for line in ["first", "second", "third"]:
         st.session_state[f"analgesia_{line}_line"] = "Not used"
@@ -399,8 +399,8 @@ def initialise_state() -> None:
         if f"{key}_time" not in st.session_state:
             st.session_state[f"{key}_time"] = st.session_state["admission_time"]
 
-        if f"{key}_not_done" not in st.session_state:
-            st.session_state[f"{key}_not_done"] = False
+        if f"{key}_performed" not in st.session_state:
+            st.session_state[f"{key}_performed"] = False
 
 
 def sync_interventions_to_admission() -> None:
@@ -409,7 +409,7 @@ def sync_interventions_to_admission() -> None:
     for item in ALL_TIMED_ITEMS:
         key = item["key"]
 
-        if not st.session_state.get(f"{key}_not_done", False):
+        if st.session_state.get(f"{key}_performed", False):
             st.session_state[f"{key}_day"] = 0
             st.session_state[f"{key}_time"] = admission_time
 
@@ -574,7 +574,7 @@ def render_background_section() -> dict:
                 key="hib_vaccinated",
             )
 
-        st.markdown("**Relevant background history**")
+        st.markdown("**Previous procedures**")
         hist_col1, hist_col2, hist_col3 = st.columns(3)
 
         with hist_col1:
@@ -595,7 +595,7 @@ def render_background_section() -> dict:
                 key="bone_marrow_transplant",
             )
 
-        st.markdown("**Background medications / programmes**")
+        st.markdown("**Admission medications**")
         med_col1, med_col2, med_col3 = st.columns(3)
 
         with med_col1:
@@ -844,13 +844,13 @@ def render_treatment_details(key: str) -> dict:
 
 def render_timed_row(label: str, key: str) -> dict:
     with st.container(border=True):
-        col1, col2, col3, col4 = st.columns([1.8, 1.2, 1.3, 1.1])
+        col1, col2, col3, col4 = st.columns([1.8, 1.1, 1.3, 1.1])
 
         with col1:
             st.markdown(f"### {label}")
 
         with col2:
-            not_done = st.checkbox("Not performed", key=f"{key}_not_done")
+            performed = st.checkbox("Performed", key=f"{key}_performed")
 
         with col3:
             event_day = st.number_input(
@@ -859,7 +859,7 @@ def render_timed_row(label: str, key: str) -> dict:
                 max_value=365,
                 step=1,
                 key=f"{key}_day",
-                disabled=not_done,
+                disabled=not performed,
                 label_visibility="collapsed",
                 help="Day 0 = day of admission. Day 1 = next day.",
             )
@@ -868,17 +868,17 @@ def render_timed_row(label: str, key: str) -> dict:
             event_time = st.time_input(
                 "Time",
                 key=f"{key}_time",
-                disabled=not_done,
+                disabled=not performed,
                 label_visibility="collapsed",
             )
 
         details = empty_treatment_details(key)
 
-        if not not_done and key in {"analgesia", "steroids", "antibiotics", "respiratory_referral"}:
+        if performed and key in {"analgesia", "steroids", "antibiotics", "respiratory_referral"}:
             st.divider()
             details = render_treatment_details(key)
 
-    if not_done:
+    if not performed:
         return {
             "label": label,
             "performed": False,
@@ -896,12 +896,31 @@ def render_timed_row(label: str, key: str) -> dict:
     }
 
 
+
 def render_timed_section(section_name: str, items: list) -> dict:
     st.header(section_name)
     values = {}
 
     if section_name == "Treatment":
-        st.caption("For analgesia, steroids and antibiotics, select 'performed' and complete the drug details below the relevant treatment.")
+        st.caption("Tick 'Performed' to open the day/time fields and any treatment-specific details.")
+
+        left_keys = {"analgesia", "steroids", "antibiotics"}
+        left_items = [item for item in items if item["key"] in left_keys]
+        right_items = [item for item in items if item["key"] not in left_keys]
+
+        col_left, col_right = st.columns(2)
+
+        with col_left:
+            st.markdown("### Core treatments")
+            for item in left_items:
+                values[item["key"]] = render_timed_row(item["label"], item["key"])
+
+        with col_right:
+            st.markdown("### Other treatments")
+            for item in right_items:
+                values[item["key"]] = render_timed_row(item["label"], item["key"])
+
+        return values
 
     col_left, col_right = st.columns(2)
 
@@ -914,6 +933,7 @@ def render_timed_section(section_name: str, items: list) -> dict:
             values[key] = render_timed_row(label, key)
 
     return values
+
 
 
 
