@@ -325,7 +325,7 @@ def render_patient_section():
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        patient_id = st.text_input("Study / Audit ID", key="patient_id")
+        patient_id = st.text_input("Resarch ID", key="patient_id")
 
     with col2:
         admission_month = st.selectbox(
@@ -740,7 +740,7 @@ def main() -> None:
 
     if st.button("Submit Record"):
         if not patient_id.strip():
-            st.error("Please enter a Patient ID.")
+            st.error("Please enter a Research ID ")
         else:
             los_hours, _ = calculate_length_of_stay(
                 admission_time,
@@ -778,31 +778,6 @@ def main() -> None:
 
                 except Exception as e:
                     st.error(f"Google Sheets save failed: {e}")
-    else:
-        record = build_record(
-                patient_id,
-                admission_month,
-                admission_year,
-                admission_time,
-                discharge_day,
-                discharge_time,
-                background_values,
-                timed_section_values,
-                drug_values,
-                microbiology_values,
-                outcome_values,
-            )
-            try:
-                save_to_google_sheets(record)
-                load_sheet_data.clear()
-
-                st.session_state["submitted"] = True
-                st.session_state["reset_requested"] = True
-
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"Google Sheets save failed: {e}")
 
     render_saved_data_section()
 
