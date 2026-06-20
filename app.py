@@ -741,7 +741,7 @@ def main() -> None:
     if st.button("Submit Record"):
         if not patient_id.strip():
             st.error("Please enter a Patient ID.")
-            else:
+        else:
             los_hours, _ = calculate_length_of_stay(
                 admission_time,
                 discharge_day,
