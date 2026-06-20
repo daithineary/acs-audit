@@ -35,6 +35,14 @@ if not check_password():
 # =========================
 APP_TITLE = "Sickle Cell ACS Audit Tool"
 
+MONTH_OPTIONS = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+]
+
+CURRENT_YEAR = datetime.now().year
+YEAR_OPTIONS = list(range(CURRENT_YEAR - 10, CURRENT_YEAR + 1))
+
 SEX_OPTIONS = ["Female", "Male", "Other", "Unknown"]
 
 GENOTYPE_OPTIONS = [
@@ -217,17 +225,7 @@ def serialise_multiselect(values):
         return ""
     return "; ".join(values)
 
-def calculate_age_years(dob, admission_dt):
-    if dob is None or admission_dt is None:
-        return None
 
-    admission_date = admission_dt.date()
-    age = admission_date.year - dob.year
-
-    if (admission_date.month, admission_date.day) < (dob.month, dob.day):
-        age -= 1
-
-    return age
 # =========================
 # Session state helpers
 # =========================
@@ -324,48 +322,68 @@ def render_header() -> None:
 
 def render_patient_section():
     st.header("Patient Information")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        patient_id = st.text_input("Patient ID", key="patient_id")
+        patient_id = st.text_input("Study / Audit ID", key="patient_id")
 
     with col2:
-        admission_datetime = st.datetime_input(
-            "Admission Date & Time",
-            key="admission_datetime",
-            on_change=sync_interventions_to_admission,
+        admission_month = st.selectbox(
+            "Admission Month",
+            options=MONTH_OPTIONS,
+            key="admission_month",
         )
 
     with col3:
-        discharge_datetime = st.datetime_input(
-            "Discharge Date & Time",
-            key="discharge_datetime",
+        admission_year = st.selectbox(
+            "Admission Year",
+            options=YEAR_OPTIONS,
+            key="admission_year",
         )
 
-    return patient_id, admission_datetime, discharge_datetime
+    with col4:
+        admission_time = st.time_input(
+            "Admission Time",
+            key="admission_time",
+            on_change=sync_interventions_to_admission,
+        )
 
+    st.subheader("Discharge")
+    dcol1, dcol2 = st.columns(2)
+
+    with dcol1:
+        discharge_day = st.number_input(
+            "Discharge Day",
+            min_value=0,
+            max_value=365,
+            step=1,
+            key="discharge_day",
+            help="Day 0 = day of admission. Day 1 = next day.",
+        )
+
+    with dcol2:
+        discharge_time = st.time_input(
+            "Discharge Time",
+            key="discharge_time",
+        )
+
+    return patient_id, admission_month, admission_year, admission_time, discharge_day, discharge_time
 
 
 def render_background_section() -> dict:
-    st.header("Background / Patient Phenotype")
+    st.header("Patient Phenotype")
     values = {}
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        values["date_of_birth"] = st.date_input(
-            "Date of Birth",
-            key="date_of_birth",
-            min_value=date(1990, 1, 1),
-            max_value=date.today(),
+        values["age_at_admission"] = st.number_input(
+            "Age at Admission",
+            min_value=0,
+            max_value=120,
+            step=1,
+            key="age_at_admission",
         )
-
-        values["age_years"] = calculate_age_years(
-            values["date_of_birth"],
-            st.session_state["admission_datetime"],
-        )
-
-        st.caption(f"Calculated age at admission: {values['age_years']} years")
 
     with col2:
         values["sex"] = st.selectbox(
@@ -389,7 +407,7 @@ def render_background_section() -> dict:
     else:
         values["genotype_other"] = ""
 
-    st.subheader("Background medications / programmes")
+    st.subheader("Background")
     med_col1, med_col2, med_col3 = st.columns(3)
 
     with med_col1:
@@ -434,11 +452,15 @@ def render_timed_row(label: str, key: str) -> dict:
             not_done = st.checkbox("Not performed", key=f"{key}_not_done")
 
         with col3:
-            event_date = st.date_input(
-                "Date",
-                key=f"{key}_date",
+            event_day = st.number_input(
+                "Day",
+                min_value=0,
+                max_value=365,
+                step=1,
+                key=f"{key}_day",
                 disabled=not_done,
                 label_visibility="collapsed",
+                help="Day 0 = day of admission. Day 1 = next day.",
             )
 
         with col4:
@@ -453,14 +475,14 @@ def render_timed_row(label: str, key: str) -> dict:
         return {
             "label": label,
             "performed": False,
-            "date": None,
+            "day": None,
             "time": None,
         }
 
     return {
         "label": label,
         "performed": True,
-        "date": event_date,
+        "day": event_day,
         "time": event_time,
     }
 
@@ -662,10 +684,14 @@ def build_record(
 def normalise_value_for_sheet(value):
     if isinstance(value, datetime):
         return value.isoformat(sep=" ", timespec="minutes")
+
+    if isinstance(value, date):
+        return value.isoformat()
+
     if value is None:
         return ""
-    return value
 
+    return value
 
 
 def save_to_google_sheets(data_dict):
