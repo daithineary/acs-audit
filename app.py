@@ -28,6 +28,38 @@ GENOTYPE_OPTIONS = [
     "Unknown",
 ]
 
+ANALGESIA_OPTIONS = [
+    "Not used",
+    "Paracetamol",
+    "Ibuprofen",
+    "Diclofenac",
+    "Oral morphine",
+    "IV morphine",
+    "Subcutaneous morphine",
+    "Oxycodone",
+    "Fentanyl",
+    "Morphine PCA",
+    "Ketamine",
+    "Other",
+]
+
+READMISSION_REASON_OPTIONS = [
+    "Pain crisis / vaso-occlusive crisis",
+    "Acute chest syndrome",
+    "Infection",
+    "Anaemia",
+    "Other",
+    "Unknown",
+]
+
+RESPIRATORY_REFERRAL_TIMING_OPTIONS = [
+    "Not referred",
+    "Reviewed during admission",
+    "Outpatient referral within 6 months",
+    "Outpatient referral after 6 months",
+    "Unknown",
+]
+
 STEROID_OPTIONS = [
     "Dexamethasone",
     "Hydrocortisone",
@@ -36,8 +68,16 @@ STEROID_OPTIONS = [
     "Other",
 ]
 
+STEROID_WEAN_OPTIONS = [
+    "No wean",
+    "Fixed course stopped",
+    "Weaning course used",
+    "Unknown",
+]
+
 ANTIBIOTIC_OPTIONS = [
     "Co-amoxiclav",
+    "Phenoxymethylpenicillin (Calvepen)",
     "Ceftriaxone",
     "Cefotaxime",
     "Piperacillin-tazobactam / Tazocin",
@@ -180,10 +220,24 @@ def reset_form_state() -> None:
         st.session_state[f"{key}_time"] = now.time()
         st.session_state[f"{key}_not_done"] = False
 
+    for line in ["first", "second", "third"]:
+        st.session_state[f"analgesia_{line}_line"] = "Not used"
+        st.session_state[f"analgesia_{line}_dose_mg_per_kg"] = 0.0
+        st.session_state[f"analgesia_{line}_other"] = ""
+
     st.session_state["steroids_given"] = []
     st.session_state["steroids_other"] = ""
+    st.session_state["steroid_max_dose_mg_per_kg"] = 0.0
+    st.session_state["steroid_weaning_protocol"] = "Unknown"
+    st.session_state["steroid_wean_duration_days"] = 0
+    st.session_state["steroid_notes"] = ""
+
     st.session_state["antibiotics_given"] = []
+    st.session_state["antibiotic_dose_mg_per_kg"] = ""
     st.session_state["antibiotics_other"] = ""
+
+    st.session_state["respiratory_referral_timing"] = "Not referred"
+    st.session_state["respiratory_referral_notes"] = ""
 
     st.session_state["highest_respiratory_support"] = "None"
     st.session_state["bacterium_isolated"] = False
@@ -193,6 +247,12 @@ def reset_form_state() -> None:
     st.session_state["picu_admission"] = False
     st.session_state["developed_atelectasis"] = False
     st.session_state["death"] = False
+
+    st.session_state["readmitted"] = False
+    st.session_state["weeks_to_readmission"] = 0.0
+    st.session_state["readmission_reason"] = "Unknown"
+    st.session_state["readmission_reason_other"] = ""
+    st.session_state["readmission_notes"] = ""
 
 
 def handle_pending_reset() -> None:
@@ -283,10 +343,29 @@ def initialise_state() -> None:
         "regular_exchange_transfusion_programme": False,
         "background_notes": "",
 
+        "analgesia_first_line": "Not used",
+        "analgesia_first_dose_mg_per_kg": 0.0,
+        "analgesia_first_other": "",
+        "analgesia_second_line": "Not used",
+        "analgesia_second_dose_mg_per_kg": 0.0,
+        "analgesia_second_other": "",
+        "analgesia_third_line": "Not used",
+        "analgesia_third_dose_mg_per_kg": 0.0,
+        "analgesia_third_other": "",
+
         "steroids_given": [],
         "steroids_other": "",
+        "steroid_max_dose_mg_per_kg": 0.0,
+        "steroid_weaning_protocol": "Unknown",
+        "steroid_wean_duration_days": 0,
+        "steroid_notes": "",
+
         "antibiotics_given": [],
+        "antibiotic_dose_mg_per_kg": "",
         "antibiotics_other": "",
+
+        "respiratory_referral_timing": "Not referred",
+        "respiratory_referral_notes": "",
 
         "highest_respiratory_support": "None",
         "bacterium_isolated": False,
@@ -296,6 +375,12 @@ def initialise_state() -> None:
         "picu_admission": False,
         "developed_atelectasis": False,
         "death": False,
+
+        "readmitted": False,
+        "weeks_to_readmission": 0.0,
+        "readmission_reason": "Unknown",
+        "readmission_reason_other": "",
+        "readmission_notes": "",
     }
 
     for key, value in defaults.items():
@@ -332,7 +417,7 @@ def sync_interventions_to_admission() -> None:
 def render_header() -> None:
     st.title(APP_TITLE)
     st.caption("Record timings of key ACS interventions relative to admission time.")
-    st.caption("No specific admission, discharge or intervention dates are collected.")
+    st.caption("No specific admission, discharge, date of birth, or intervention dates are collected.")
 
     if st.session_state.get("submitted"):
         st.success("✅ Submitted successfully")
@@ -342,7 +427,30 @@ def render_header() -> None:
         """
         <style>
         .block-container {
-            padding-top: 3rem;
+            padding-top: 2.5rem;
+        }
+
+        h1 {
+            font-size: 2.8rem !important;
+        }
+
+        h2 {
+            font-size: 2.0rem !important;
+            margin-top: 2rem !important;
+        }
+
+        h3 {
+            font-size: 1.35rem !important;
+            margin-top: 1rem !important;
+        }
+
+        div[data-testid="stExpander"] details summary p {
+            font-size: 1.05rem !important;
+        }
+
+        .small-note {
+            font-size: 0.95rem;
+            opacity: 0.8;
         }
         </style>
         """,
@@ -353,165 +461,351 @@ def render_header() -> None:
 def render_patient_section():
     st.header("Patient Information")
 
-    col1, col2, col3, col4 = st.columns(4)
+    with st.container(border=True):
+        col1, col2, col3, col4 = st.columns(4)
 
-    with col1:
-        patient_id = st.text_input("Research ID", key="patient_id")
+        with col1:
+            patient_id = st.text_input("Research ID", key="patient_id")
 
-    with col2:
-        admission_month = st.selectbox(
-            "Admission Month",
-            options=MONTH_OPTIONS,
-            key="admission_month",
-        )
+        with col2:
+            admission_month = st.selectbox(
+                "Admission Month",
+                options=MONTH_OPTIONS,
+                key="admission_month",
+            )
 
-    with col3:
-        admission_year = st.selectbox(
-            "Admission Year",
-            options=YEAR_OPTIONS,
-            key="admission_year",
-        )
+        with col3:
+            admission_year = st.selectbox(
+                "Admission Year",
+                options=YEAR_OPTIONS,
+                key="admission_year",
+            )
 
-    with col4:
-        admission_time = st.time_input(
-            "Admission Time",
-            key="admission_time",
-            on_change=sync_interventions_to_admission,
-        )
+        with col4:
+            admission_time = st.time_input(
+                "Admission Time",
+                key="admission_time",
+                on_change=sync_interventions_to_admission,
+            )
 
-    st.subheader("Discharge")
+        st.markdown("### Discharge")
 
-    dcol1, dcol2 = st.columns(2)
+        dcol1, dcol2 = st.columns(2)
 
-    with dcol1:
-        discharge_day = st.number_input(
-            "Discharge Day",
-            min_value=0,
-            max_value=365,
-            step=1,
-            key="discharge_day",
-            help="Day 0 = day of admission. Day 1 = next day.",
-        )
+        with dcol1:
+            discharge_day = st.number_input(
+                "Discharge Day",
+                min_value=0,
+                max_value=365,
+                step=1,
+                key="discharge_day",
+                help="Day 0 = day of admission. Day 1 = next day.",
+            )
 
-    with dcol2:
-        discharge_time = st.time_input(
-            "Discharge Time",
-            key="discharge_time",
-        )
+        with dcol2:
+            discharge_time = st.time_input(
+                "Discharge Time",
+                key="discharge_time",
+            )
 
     return patient_id, admission_month, admission_year, admission_time, discharge_day, discharge_time
 
 
 def render_background_section() -> dict:
-    st.header("Patient Phenotype")
+    st.header("Background")
     values = {}
 
-    col1, col2, col3 = st.columns(3)
+    with st.container(border=True):
+        st.markdown("### Patient phenotype")
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            values["age_at_admission"] = st.number_input(
+                "Age at Admission",
+                min_value=0,
+                max_value=120,
+                step=1,
+                key="age_at_admission",
+            )
+
+        with col2:
+            values["sex"] = st.selectbox(
+                "Sex",
+                options=SEX_OPTIONS,
+                key="sex",
+            )
+
+        with col3:
+            values["genotype"] = st.selectbox(
+                "Sickle Cell Genotype",
+                options=GENOTYPE_OPTIONS,
+                key="genotype",
+            )
+
+        if values["genotype"] == "Other":
+            values["genotype_other"] = st.text_input(
+                "Specify other genotype",
+                key="genotype_other",
+            )
+        else:
+            values["genotype_other"] = ""
+
+        st.divider()
+
+        st.markdown("### Vaccination status")
+        vacc_col1, vacc_col2, vacc_col3 = st.columns(3)
+
+        with vacc_col1:
+            values["influenza_vaccinated"] = st.checkbox(
+                "Influenza vaccinated",
+                key="influenza_vaccinated",
+            )
+
+        with vacc_col2:
+            values["pneumococcal_vaccinated"] = st.checkbox(
+                "Pneumococcal vaccinated",
+                key="pneumococcal_vaccinated",
+            )
+
+        with vacc_col3:
+            values["hib_vaccinated"] = st.checkbox(
+                "Haemophilus influenzae type B vaccinated",
+                key="hib_vaccinated",
+            )
+
+        st.divider()
+
+        st.markdown("### Relevant background history")
+        hist_col1, hist_col2, hist_col3 = st.columns(3)
+
+        with hist_col1:
+            values["splenectomy"] = st.checkbox(
+                "Splenectomy",
+                key="splenectomy",
+            )
+
+        with hist_col2:
+            values["liver_transplant"] = st.checkbox(
+                "Liver transplant",
+                key="liver_transplant",
+            )
+
+        with hist_col3:
+            values["bone_marrow_transplant"] = st.checkbox(
+                "Bone marrow transplant",
+                key="bone_marrow_transplant",
+            )
+
+        st.divider()
+
+        st.markdown("### Background medications / programmes")
+        med_col1, med_col2, med_col3 = st.columns(3)
+
+        with med_col1:
+            values["hydroxyurea"] = st.checkbox("Hydroxyurea", key="hydroxyurea")
+            values["folic_acid"] = st.checkbox("Folic acid", key="folic_acid")
+
+        with med_col2:
+            values["vitamin_d"] = st.checkbox("Vitamin D", key="vitamin_d")
+            values["regular_transfusion_programme"] = st.checkbox(
+                "Regular transfusion programme",
+                key="regular_transfusion_programme",
+            )
+
+        with med_col3:
+            values["regular_venesection"] = st.checkbox(
+                "Regular venesection",
+                key="regular_venesection",
+            )
+            values["regular_exchange_transfusion_programme"] = st.checkbox(
+                "Regular exchange transfusion programme",
+                key="regular_exchange_transfusion_programme",
+            )
+
+        values["background_notes"] = st.text_area(
+            "Other background notes",
+            key="background_notes",
+            height=90,
+        )
+
+    return values
+
+
+def empty_treatment_details(key: str) -> dict:
+    if key == "analgesia":
+        return {
+            "Analgesia_first_line": "",
+            "Analgesia_first_dose_mg_per_kg": "",
+            "Analgesia_first_other": "",
+            "Analgesia_second_line": "",
+            "Analgesia_second_dose_mg_per_kg": "",
+            "Analgesia_second_other": "",
+            "Analgesia_third_line": "",
+            "Analgesia_third_dose_mg_per_kg": "",
+            "Analgesia_third_other": "",
+        }
+
+    if key == "steroids":
+        return {
+            "Steroids_given": "",
+            "Steroids_other": "",
+            "Steroid_max_dose_mg_per_kg": "",
+            "Steroid_weaning_protocol": "",
+            "Steroid_wean_duration_days": "",
+            "Steroid_notes": "",
+        }
+
+    if key == "antibiotics":
+        return {
+            "Antibiotics_given": "",
+            "Antibiotic_dose_mg_per_kg": "",
+            "Antibiotics_other": "",
+        }
+
+    return {}
+
+
+def render_analgesia_line(line_label: str, line_key: str) -> dict:
+    st.markdown(f"##### {line_label}")
+
+    col1, col2 = st.columns([2, 1])
 
     with col1:
-        values["age_at_admission"] = st.number_input(
-            "Age at Admission",
-            min_value=0,
-            max_value=120,
-            step=1,
-            key="age_at_admission",
+        analgesia_choice = st.selectbox(
+            f"{line_label} analgesia",
+            options=ANALGESIA_OPTIONS,
+            key=f"analgesia_{line_key}_line",
         )
 
     with col2:
-        values["sex"] = st.selectbox(
-            "Sex",
-            options=SEX_OPTIONS,
-            key="sex",
-        )
+        if analgesia_choice == "Not used":
+            dose = ""
+            st.number_input(
+                f"{line_label} dose, mg/kg",
+                min_value=0.0,
+                max_value=100.0,
+                step=0.1,
+                key=f"analgesia_{line_key}_dose_mg_per_kg",
+                disabled=True,
+            )
+        else:
+            dose = st.number_input(
+                f"{line_label} dose, mg/kg",
+                min_value=0.0,
+                max_value=100.0,
+                step=0.1,
+                key=f"analgesia_{line_key}_dose_mg_per_kg",
+            )
 
-    with col3:
-        values["genotype"] = st.selectbox(
-            "Sickle Cell Genotype",
-            options=GENOTYPE_OPTIONS,
-            key="genotype",
-        )
-
-    if values["genotype"] == "Other":
-        values["genotype_other"] = st.text_input(
-            "Specify other genotype",
-            key="genotype_other",
+    if analgesia_choice == "Other":
+        other = st.text_input(
+            f"Specify other {line_label.lower()} analgesia",
+            key=f"analgesia_{line_key}_other",
         )
     else:
-        values["genotype_other"] = ""
+        other = ""
 
-    st.subheader("Vaccination Status")
-    vacc_col1, vacc_col2, vacc_col3 = st.columns(3)
+    return {
+        f"Analgesia_{line_key}_line": analgesia_choice,
+        f"Analgesia_{line_key}_dose_mg_per_kg": dose,
+        f"Analgesia_{line_key}_other": other,
+    }
 
-    with vacc_col1:
-        values["influenza_vaccinated"] = st.checkbox(
-            "Influenza vaccinated",
-            key="influenza_vaccinated",
+
+def render_treatment_details(key: str) -> dict:
+    details = empty_treatment_details(key)
+
+    if key == "analgesia":
+        st.markdown("#### Analgesia details")
+        st.caption("Record the stepwise analgesia plan. Doses should be entered in mg/kg.")
+
+        details.update(render_analgesia_line("First-line", "first"))
+        details.update(render_analgesia_line("Second-line if required", "second"))
+        details.update(render_analgesia_line("Third-line if required", "third"))
+
+    elif key == "steroids":
+        st.markdown("#### Steroid details")
+        st.caption("Record steroid doses in mg/kg.")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            details["Steroids_given"] = st.multiselect(
+                "Steroid given",
+                options=STEROID_OPTIONS,
+                key="steroids_given",
+            )
+
+            if "Other" in details["Steroids_given"]:
+                details["Steroids_other"] = st.text_input(
+                    "Specify other steroid",
+                    key="steroids_other",
+                )
+            else:
+                details["Steroids_other"] = ""
+
+        with col2:
+            details["Steroid_max_dose_mg_per_kg"] = st.number_input(
+                "Maximum steroid dose, mg/kg",
+                min_value=0.0,
+                max_value=100.0,
+                step=0.1,
+                key="steroid_max_dose_mg_per_kg",
+            )
+
+        col3, col4 = st.columns(2)
+
+        with col3:
+            details["Steroid_weaning_protocol"] = st.selectbox(
+                "Steroid weaning approach",
+                options=STEROID_WEAN_OPTIONS,
+                key="steroid_weaning_protocol",
+            )
+
+        with col4:
+            if details["Steroid_weaning_protocol"] == "Weaning course used":
+                details["Steroid_wean_duration_days"] = st.number_input(
+                    "Duration of wean, days",
+                    min_value=0,
+                    max_value=120,
+                    step=1,
+                    key="steroid_wean_duration_days",
+                )
+            else:
+                details["Steroid_wean_duration_days"] = ""
+
+        details["Steroid_notes"] = st.text_area(
+            "Steroid notes / protocol details",
+            key="steroid_notes",
+            height=70,
+            placeholder="Optional. For example, dose reductions or local protocol wording.",
         )
 
-    with vacc_col2:
-        values["pneumococcal_vaccinated"] = st.checkbox(
-            "Pneumococcal vaccinated",
-            key="pneumococcal_vaccinated",
+    elif key == "antibiotics":
+        st.markdown("#### Antibiotic details")
+        st.caption("Record antibiotic doses in mg/kg. Use the notes box if multiple agents had different doses.")
+
+        details["Antibiotics_given"] = st.multiselect(
+            "Antibiotics given",
+            options=ANTIBIOTIC_OPTIONS,
+            key="antibiotics_given",
         )
 
-    with vacc_col3:
-        values["hib_vaccinated"] = st.checkbox(
-            "Haemophilus influenzae type B vaccinated",
-            key="hib_vaccinated",
+        details["Antibiotic_dose_mg_per_kg"] = st.text_input(
+            "Antibiotic dose(s), mg/kg",
+            key="antibiotic_dose_mg_per_kg",
+            placeholder="e.g. ceftriaxone 50 mg/kg; azithromycin 10 mg/kg",
         )
 
-    st.subheader("Relevant Background History")
-    hist_col1, hist_col2, hist_col3 = st.columns(3)
+        if "Other" in details["Antibiotics_given"]:
+            details["Antibiotics_other"] = st.text_input(
+                "Specify other antibiotic",
+                key="antibiotics_other",
+            )
+        else:
+            details["Antibiotics_other"] = ""
 
-    with hist_col1:
-        values["splenectomy"] = st.checkbox(
-            "Splenectomy",
-            key="splenectomy",
-        )
-
-    with hist_col2:
-        values["liver_transplant"] = st.checkbox(
-            "Liver transplant",
-            key="liver_transplant",
-        )
-
-    with hist_col3:
-        values["bone_marrow_transplant"] = st.checkbox(
-            "Bone marrow transplant",
-            key="bone_marrow_transplant",
-        )
-
-    st.subheader("Background Medications / Programmes")
-    med_col1, med_col2, med_col3 = st.columns(3)
-
-    with med_col1:
-        values["hydroxyurea"] = st.checkbox("Hydroxyurea", key="hydroxyurea")
-        values["folic_acid"] = st.checkbox("Folic acid", key="folic_acid")
-
-    with med_col2:
-        values["vitamin_d"] = st.checkbox("Vitamin D", key="vitamin_d")
-        values["regular_transfusion_programme"] = st.checkbox(
-            "Regular transfusion programme",
-            key="regular_transfusion_programme",
-        )
-
-    with med_col3:
-        values["regular_venesection"] = st.checkbox(
-            "Regular venesection",
-            key="regular_venesection",
-        )
-        values["regular_exchange_transfusion_programme"] = st.checkbox(
-            "Regular exchange transfusion programme",
-            key="regular_exchange_transfusion_programme",
-        )
-
-    values["background_notes"] = st.text_area(
-        "Other background notes",
-        key="background_notes",
-        height=80,
-    )
-
-    return values
+    return details
 
 
 def render_timed_row(label: str, key: str) -> dict:
@@ -519,7 +813,7 @@ def render_timed_row(label: str, key: str) -> dict:
         col1, col2, col3, col4 = st.columns([1.8, 1.2, 1.3, 1.1])
 
         with col1:
-            st.markdown(f"**{label}**")
+            st.markdown(f"### {label}")
 
         with col2:
             not_done = st.checkbox("Not performed", key=f"{key}_not_done")
@@ -544,12 +838,19 @@ def render_timed_row(label: str, key: str) -> dict:
                 label_visibility="collapsed",
             )
 
+        details = empty_treatment_details(key)
+
+        if not not_done and key in {"analgesia", "steroids", "antibiotics"}:
+            st.divider()
+            details = render_treatment_details(key)
+
     if not_done:
         return {
             "label": label,
             "performed": False,
             "day": None,
             "time": None,
+            "details": details,
         }
 
     return {
@@ -557,12 +858,17 @@ def render_timed_row(label: str, key: str) -> dict:
         "performed": True,
         "day": event_day,
         "time": event_time,
+        "details": details,
     }
 
 
 def render_timed_section(section_name: str, items: list) -> dict:
     st.header(section_name)
     values = {}
+
+    if section_name == "Treatment":
+        st.caption("For analgesia, steroids and antibiotics, select 'performed' and complete the drug details below the relevant treatment.")
+
     col_left, col_right = st.columns(2)
 
     for idx, item in enumerate(items):
@@ -576,41 +882,30 @@ def render_timed_section(section_name: str, items: list) -> dict:
     return values
 
 
-def render_drug_details_section() -> dict:
-    st.header("Drug Details")
+
+def render_referral_section() -> dict:
+    st.header("Referrals / Follow-up")
     values = {}
 
-    col1, col2 = st.columns(2)
+    with st.container(border=True):
+        st.markdown("### Respiratory referral / review")
 
-    with col1:
-        values["steroids_given"] = st.multiselect(
-            "Steroids given",
-            options=STEROID_OPTIONS,
-            key="steroids_given",
-        )
+        col1, col2 = st.columns(2)
 
-        if "Other" in values["steroids_given"]:
-            values["steroids_other"] = st.text_input(
-                "Specify other steroid",
-                key="steroids_other",
+        with col1:
+            values["respiratory_referral_timing"] = st.selectbox(
+                "Respiratory input",
+                options=RESPIRATORY_REFERRAL_TIMING_OPTIONS,
+                key="respiratory_referral_timing",
             )
-        else:
-            values["steroids_other"] = ""
 
-    with col2:
-        values["antibiotics_given"] = st.multiselect(
-            "Antibiotics given",
-            options=ANTIBIOTIC_OPTIONS,
-            key="antibiotics_given",
-        )
-
-        if "Other" in values["antibiotics_given"]:
-            values["antibiotics_other"] = st.text_input(
-                "Specify other antibiotic",
-                key="antibiotics_other",
+        with col2:
+            values["respiratory_referral_notes"] = st.text_area(
+                "Respiratory referral / review notes",
+                key="respiratory_referral_notes",
+                height=80,
+                placeholder="Optional. For example, reviewed during admission, outpatient referral requested, or reason not referred.",
             )
-        else:
-            values["antibiotics_other"] = ""
 
     return values
 
@@ -619,29 +914,30 @@ def render_microbiology_section() -> dict:
     st.header("Microbiology")
     values = {}
 
-    col1, col2 = st.columns(2)
+    with st.container(border=True):
+        col1, col2 = st.columns(2)
 
-    with col1:
-        values["bacterium_isolated"] = st.checkbox(
-            "Bacterium isolated",
-            key="bacterium_isolated",
-        )
+        with col1:
+            values["bacterium_isolated"] = st.checkbox(
+                "Bacterium isolated",
+                key="bacterium_isolated",
+            )
 
-    with col2:
-        values["bacterium"] = st.selectbox(
-            "Bacterium",
-            options=BACTERIA_OPTIONS,
-            key="bacterium",
-            disabled=not values["bacterium_isolated"],
-        )
+        with col2:
+            values["bacterium"] = st.selectbox(
+                "Bacterium",
+                options=BACTERIA_OPTIONS,
+                key="bacterium",
+                disabled=not values["bacterium_isolated"],
+            )
 
-    if values["bacterium_isolated"] and values["bacterium"] == "Other":
-        values["bacterium_other"] = st.text_input(
-            "Specify other bacterium",
-            key="bacterium_other",
-        )
-    else:
-        values["bacterium_other"] = ""
+        if values["bacterium_isolated"] and values["bacterium"] == "Other":
+            values["bacterium_other"] = st.text_input(
+                "Specify other bacterium",
+                key="bacterium_other",
+            )
+        else:
+            values["bacterium_other"] = ""
 
     return values
 
@@ -649,30 +945,82 @@ def render_microbiology_section() -> dict:
 def render_outcome_section() -> dict:
     st.header("Outcome")
     values = {}
-    col1, col2 = st.columns(2)
 
-    with col1:
-        values["highest_respiratory_support"] = st.selectbox(
-            "Highest Level of Respiratory Support Required",
-            options=RESPIRATORY_SUPPORT_OPTIONS,
-            key="highest_respiratory_support",
+    with st.container(border=True):
+        st.markdown("### Admission outcome")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            values["highest_respiratory_support"] = st.selectbox(
+                "Highest Level of Respiratory Support Required",
+                options=RESPIRATORY_SUPPORT_OPTIONS,
+                key="highest_respiratory_support",
+            )
+
+            values["picu_admission"] = st.checkbox(
+                "PICU Admission",
+                key="picu_admission",
+            )
+
+        with col2:
+            values["developed_atelectasis"] = st.checkbox(
+                "Developed Atelectasis",
+                key="developed_atelectasis",
+            )
+
+            values["death"] = st.checkbox(
+                "Death",
+                key="death",
+            )
+
+        st.divider()
+        st.markdown("### Readmission")
+
+        values["readmitted"] = st.checkbox(
+            "Readmitted after discharge",
+            key="readmitted",
         )
 
-        values["picu_admission"] = st.checkbox(
-            "PICU Admission",
-            key="picu_admission",
-        )
+        if values["readmitted"]:
+            rcol1, rcol2 = st.columns(2)
 
-    with col2:
-        values["developed_atelectasis"] = st.checkbox(
-            "Developed Atelectasis",
-            key="developed_atelectasis",
-        )
+            with rcol1:
+                values["weeks_to_readmission"] = st.number_input(
+                    "Time from discharge to readmission, weeks",
+                    min_value=0.0,
+                    max_value=104.0,
+                    step=0.5,
+                    key="weeks_to_readmission",
+                )
 
-        values["death"] = st.checkbox(
-            "Death",
-            key="death",
-        )
+            with rcol2:
+                values["readmission_reason"] = st.selectbox(
+                    "Reason for readmission",
+                    options=READMISSION_REASON_OPTIONS,
+                    key="readmission_reason",
+                )
+
+            if values["readmission_reason"] == "Other":
+                values["readmission_reason_other"] = st.text_input(
+                    "Specify other readmission reason",
+                    key="readmission_reason_other",
+                )
+            else:
+                values["readmission_reason_other"] = ""
+
+            values["readmission_notes"] = st.text_area(
+                "Readmission notes",
+                key="readmission_notes",
+                height=80,
+                placeholder="Optional brief note on readmission context.",
+            )
+
+        else:
+            values["weeks_to_readmission"] = ""
+            values["readmission_reason"] = ""
+            values["readmission_reason_other"] = ""
+            values["readmission_notes"] = ""
 
     return values
 
@@ -711,7 +1059,7 @@ def build_record(
     discharge_time,
     background_values: dict,
     timed_sections: dict,
-    drug_values: dict,
+    referral_values: dict,
     microbiology_values: dict,
     outcome_values: dict,
 ) -> dict:
@@ -757,16 +1105,13 @@ def build_record(
                 record[f"{safe_label}_Time"] = values["time"]
                 record[f"{safe_label}_Time_hrs"] = hours
 
-    record["Steroids_given"] = serialise_multiselect(
-        drug_values.get("steroids_given", [])
-    )
-    record["Steroids_other"] = drug_values.get("steroids_other", "")
+            for detail_key, detail_value in values.get("details", {}).items():
+                if isinstance(detail_value, list):
+                    record[detail_key] = serialise_multiselect(detail_value)
+                else:
+                    record[detail_key] = detail_value
 
-    record["Antibiotics_given"] = serialise_multiselect(
-        drug_values.get("antibiotics_given", [])
-    )
-    record["Antibiotics_other"] = drug_values.get("antibiotics_other", "")
-
+    record.update(referral_values)
     record.update(microbiology_values)
     record.update(outcome_values)
 
@@ -846,7 +1191,7 @@ def main() -> None:
     for section_name, items in SECTIONS.items():
         timed_section_values[section_name] = render_timed_section(section_name, items)
 
-    drug_values = render_drug_details_section()
+    referral_values = render_referral_section()
     microbiology_values = render_microbiology_section()
     outcome_values = render_outcome_section()
 
@@ -877,7 +1222,7 @@ def main() -> None:
                     discharge_time,
                     background_values,
                     timed_section_values,
-                    drug_values,
+                    referral_values,
                     microbiology_values,
                     outcome_values,
                 )
