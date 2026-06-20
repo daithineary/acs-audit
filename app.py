@@ -778,8 +778,8 @@ def main() -> None:
 
                 except Exception as e:
                     st.error(f"Google Sheets save failed: {e}")
-        else:
-            record = build_record(
+    else:
+        record = build_record(
                 patient_id,
                 admission_month,
                 admission_year,
