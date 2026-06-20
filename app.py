@@ -1,33 +1,7 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime, time
 import gspread
-
-
-# =========================
-# Password
-# =========================
-def check_password():
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
-
-    if st.session_state.authenticated:
-        return True
-
-    password = st.text_input("Enter password", type="password")
-
-    if st.button("Log in"):
-        if password == st.secrets["app_password"]:
-            st.session_state.authenticated = True
-            st.rerun()
-        else:
-            st.error("Incorrect password")
-
-    return False
-
-
-if not check_password():
-    st.stop()
 
 
 # =========================
@@ -126,6 +100,29 @@ ALL_TIMED_ITEMS = [item for section in SECTIONS.values() for item in section]
 
 
 # =========================
+# Password
+# =========================
+def check_password() -> bool:
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if st.session_state.authenticated:
+        return True
+
+    st.title(APP_TITLE)
+    password = st.text_input("Enter password", type="password")
+
+    if st.button("Log in"):
+        if password == st.secrets["app_password"]:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password")
+
+    return False
+
+
+# =========================
 # Google Sheets
 # =========================
 @st.cache_resource
@@ -135,11 +132,9 @@ def get_sheet():
     return sh.sheet1
 
 
-ws = get_sheet()
-
-
 @st.cache_data(ttl=10)
 def load_sheet_data():
+    ws = get_sheet()
     return ws.get_all_records()
 
 
@@ -150,13 +145,26 @@ def reset_form_state() -> None:
     now = datetime.now().replace(second=0, microsecond=0)
 
     st.session_state["patient_id"] = ""
-    st.session_state["admission_datetime"] = now
-    st.session_state["discharge_datetime"] = now
 
-    st.session_state["date_of_birth"] = date(2015, 1, 1)
+    st.session_state["admission_month"] = MONTH_OPTIONS[now.month - 1]
+    st.session_state["admission_year"] = now.year
+    st.session_state["admission_time"] = now.time()
+
+    st.session_state["discharge_day"] = 0
+    st.session_state["discharge_time"] = now.time()
+
+    st.session_state["age_at_admission"] = 0
     st.session_state["sex"] = "Unknown"
     st.session_state["genotype"] = "Unknown"
     st.session_state["genotype_other"] = ""
+
+    st.session_state["influenza_vaccinated"] = False
+    st.session_state["pneumococcal_vaccinated"] = False
+    st.session_state["hib_vaccinated"] = False
+
+    st.session_state["splenectomy"] = False
+    st.session_state["liver_transplant"] = False
+    st.session_state["bone_marrow_transplant"] = False
 
     st.session_state["hydroxyurea"] = False
     st.session_state["folic_acid"] = False
@@ -168,7 +176,7 @@ def reset_form_state() -> None:
 
     for item in ALL_TIMED_ITEMS:
         key = item["key"]
-        st.session_state[f"{key}_date"] = now.date()
+        st.session_state[f"{key}_day"] = 0
         st.session_state[f"{key}_time"] = now.time()
         st.session_state[f"{key}_not_done"] = False
 
@@ -187,7 +195,6 @@ def reset_form_state() -> None:
     st.session_state["death"] = False
 
 
-
 def handle_pending_reset() -> None:
     if st.session_state.get("reset_requested", False):
         reset_form_state()
@@ -197,27 +204,40 @@ def handle_pending_reset() -> None:
 # =========================
 # Time helpers
 # =========================
-def combine_date_and_time(selected_date, selected_time):
-    if selected_date is None or selected_time is None:
+def time_to_hours(selected_time) -> float | None:
+    if selected_time is None:
         return None
-    return datetime.combine(selected_date, selected_time)
+
+    return selected_time.hour + selected_time.minute / 60
 
 
-
-def calculate_hours_from_admission(admission_dt, event_dt):
-    if event_dt is None:
+def calculate_hours_from_admission(admission_time, event_day, event_time):
+    if admission_time is None or event_day is None or event_time is None:
         return None
-    return round((event_dt - admission_dt).total_seconds() / 3600, 2)
+
+    admission_hours = time_to_hours(admission_time)
+    event_hours = event_day * 24 + time_to_hours(event_time)
+
+    if admission_hours is None or event_hours is None:
+        return None
+
+    return round(event_hours - admission_hours, 2)
 
 
-
-def calculate_length_of_stay(admission_dt, discharge_dt):
-    if admission_dt is None or discharge_dt is None:
+def calculate_length_of_stay(admission_time, discharge_day, discharge_time):
+    if admission_time is None or discharge_day is None or discharge_time is None:
         return None, None
-    los_hours = round((discharge_dt - admission_dt).total_seconds() / 3600, 2)
-    los_days = round(los_hours / 24, 2)
-    return los_hours, los_days
 
+    admission_hours = time_to_hours(admission_time)
+    discharge_hours = discharge_day * 24 + time_to_hours(discharge_time)
+
+    if admission_hours is None or discharge_hours is None:
+        return None, None
+
+    los_hours = round(discharge_hours - admission_hours, 2)
+    los_days = round(los_hours / 24, 2)
+
+    return los_hours, los_days
 
 
 def serialise_multiselect(values):
@@ -230,24 +250,31 @@ def serialise_multiselect(values):
 # Session state helpers
 # =========================
 def initialise_state() -> None:
-    if "admission_datetime" not in st.session_state:
-        now = datetime.now().replace(second=0, microsecond=0)
-        st.session_state["admission_datetime"] = now
-
-    if "discharge_datetime" not in st.session_state:
-        st.session_state["discharge_datetime"] = st.session_state["admission_datetime"]
-
-    if "patient_id" not in st.session_state:
-        st.session_state["patient_id"] = ""
-
-    if "reset_requested" not in st.session_state:
-        st.session_state["reset_requested"] = False
+    now = datetime.now().replace(second=0, microsecond=0)
 
     defaults = {
-        "date_of_birth": date(2015, 1, 1),
+        "patient_id": "",
+        "reset_requested": False,
+
+        "admission_month": MONTH_OPTIONS[now.month - 1],
+        "admission_year": now.year,
+        "admission_time": now.time(),
+        "discharge_day": 0,
+        "discharge_time": now.time(),
+
+        "age_at_admission": 0,
         "sex": "Unknown",
         "genotype": "Unknown",
         "genotype_other": "",
+
+        "influenza_vaccinated": False,
+        "pneumococcal_vaccinated": False,
+        "hib_vaccinated": False,
+
+        "splenectomy": False,
+        "liver_transplant": False,
+        "bone_marrow_transplant": False,
+
         "hydroxyurea": False,
         "folic_acid": False,
         "vitamin_d": False,
@@ -255,14 +282,17 @@ def initialise_state() -> None:
         "regular_venesection": False,
         "regular_exchange_transfusion_programme": False,
         "background_notes": "",
+
         "steroids_given": [],
         "steroids_other": "",
         "antibiotics_given": [],
         "antibiotics_other": "",
+
         "highest_respiratory_support": "None",
         "bacterium_isolated": False,
         "bacterium": "None isolated",
         "bacterium_other": "",
+
         "picu_admission": False,
         "developed_atelectasis": False,
         "death": False,
@@ -274,24 +304,25 @@ def initialise_state() -> None:
 
     for item in ALL_TIMED_ITEMS:
         key = item["key"]
-        if f"{key}_date" not in st.session_state:
-            st.session_state[f"{key}_date"] = st.session_state["admission_datetime"].date()
+
+        if f"{key}_day" not in st.session_state:
+            st.session_state[f"{key}_day"] = 0
+
         if f"{key}_time" not in st.session_state:
-            st.session_state[f"{key}_time"] = st.session_state["admission_datetime"].time()
+            st.session_state[f"{key}_time"] = st.session_state["admission_time"]
+
         if f"{key}_not_done" not in st.session_state:
             st.session_state[f"{key}_not_done"] = False
 
 
-
 def sync_interventions_to_admission() -> None:
-    admission_dt = st.session_state["admission_datetime"]
-    admission_date = admission_dt.date()
-    admission_time = admission_dt.time()
+    admission_time = st.session_state["admission_time"]
 
     for item in ALL_TIMED_ITEMS:
         key = item["key"]
+
         if not st.session_state.get(f"{key}_not_done", False):
-            st.session_state[f"{key}_date"] = admission_date
+            st.session_state[f"{key}_day"] = 0
             st.session_state[f"{key}_time"] = admission_time
 
 
@@ -299,10 +330,10 @@ def sync_interventions_to_admission() -> None:
 # UI sections
 # =========================
 def render_header() -> None:
-    st.set_page_config(page_title=APP_TITLE, layout="wide")
     st.title(APP_TITLE)
     st.caption("Record timings of key ACS interventions relative to admission time.")
-    st.caption("Live saving to Google Sheets.")
+    st.caption("No specific admission, discharge or intervention dates are collected.")
+
     if st.session_state.get("submitted"):
         st.success("✅ Submitted successfully")
         st.session_state["submitted"] = False
@@ -319,13 +350,13 @@ def render_header() -> None:
     )
 
 
-
 def render_patient_section():
     st.header("Patient Information")
+
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        patient_id = st.text_input("Resarch ID", key="patient_id")
+        patient_id = st.text_input("Research ID", key="patient_id")
 
     with col2:
         admission_month = st.selectbox(
@@ -349,6 +380,7 @@ def render_patient_section():
         )
 
     st.subheader("Discharge")
+
     dcol1, dcol2 = st.columns(2)
 
     with dcol1:
@@ -407,7 +439,49 @@ def render_background_section() -> dict:
     else:
         values["genotype_other"] = ""
 
-    st.subheader("Background")
+    st.subheader("Vaccination Status")
+    vacc_col1, vacc_col2, vacc_col3 = st.columns(3)
+
+    with vacc_col1:
+        values["influenza_vaccinated"] = st.checkbox(
+            "Influenza vaccinated",
+            key="influenza_vaccinated",
+        )
+
+    with vacc_col2:
+        values["pneumococcal_vaccinated"] = st.checkbox(
+            "Pneumococcal vaccinated",
+            key="pneumococcal_vaccinated",
+        )
+
+    with vacc_col3:
+        values["hib_vaccinated"] = st.checkbox(
+            "Haemophilus influenzae type B vaccinated",
+            key="hib_vaccinated",
+        )
+
+    st.subheader("Relevant Background History")
+    hist_col1, hist_col2, hist_col3 = st.columns(3)
+
+    with hist_col1:
+        values["splenectomy"] = st.checkbox(
+            "Splenectomy",
+            key="splenectomy",
+        )
+
+    with hist_col2:
+        values["liver_transplant"] = st.checkbox(
+            "Liver transplant",
+            key="liver_transplant",
+        )
+
+    with hist_col3:
+        values["bone_marrow_transplant"] = st.checkbox(
+            "Bone marrow transplant",
+            key="bone_marrow_transplant",
+        )
+
+    st.subheader("Background Medications / Programmes")
     med_col1, med_col2, med_col3 = st.columns(3)
 
     with med_col1:
@@ -438,7 +512,6 @@ def render_background_section() -> dict:
     )
 
     return values
-
 
 
 def render_timed_row(label: str, key: str) -> dict:
@@ -487,7 +560,6 @@ def render_timed_row(label: str, key: str) -> dict:
     }
 
 
-
 def render_timed_section(section_name: str, items: list) -> dict:
     st.header(section_name)
     values = {}
@@ -504,7 +576,6 @@ def render_timed_section(section_name: str, items: list) -> dict:
     return values
 
 
-
 def render_drug_details_section() -> dict:
     st.header("Drug Details")
     values = {}
@@ -517,6 +588,7 @@ def render_drug_details_section() -> dict:
             options=STEROID_OPTIONS,
             key="steroids_given",
         )
+
         if "Other" in values["steroids_given"]:
             values["steroids_other"] = st.text_input(
                 "Specify other steroid",
@@ -531,6 +603,7 @@ def render_drug_details_section() -> dict:
             options=ANTIBIOTIC_OPTIONS,
             key="antibiotics_given",
         )
+
         if "Other" in values["antibiotics_given"]:
             values["antibiotics_other"] = st.text_input(
                 "Specify other antibiotic",
@@ -540,7 +613,6 @@ def render_drug_details_section() -> dict:
             values["antibiotics_other"] = ""
 
     return values
-
 
 
 def render_microbiology_section() -> dict:
@@ -574,7 +646,6 @@ def render_microbiology_section() -> dict:
     return values
 
 
-
 def render_outcome_section() -> dict:
     st.header("Outcome")
     values = {}
@@ -586,6 +657,7 @@ def render_outcome_section() -> dict:
             options=RESPIRATORY_SUPPORT_OPTIONS,
             key="highest_respiratory_support",
         )
+
         values["picu_admission"] = st.checkbox(
             "PICU Admission",
             key="picu_admission",
@@ -596,13 +668,13 @@ def render_outcome_section() -> dict:
             "Developed Atelectasis",
             key="developed_atelectasis",
         )
+
         values["death"] = st.checkbox(
             "Death",
             key="death",
         )
 
     return values
-
 
 
 def render_saved_data_section() -> None:
@@ -622,6 +694,7 @@ def render_saved_data_section() -> None:
                 )
             else:
                 st.info("No audit data saved yet.")
+
         except Exception as e:
             st.warning(f"Could not load saved data from Google Sheets: {e}")
 
@@ -631,20 +704,30 @@ def render_saved_data_section() -> None:
 # =========================
 def build_record(
     patient_id: str,
-    admission_datetime,
-    discharge_datetime,
+    admission_month: str,
+    admission_year: int,
+    admission_time,
+    discharge_day: int,
+    discharge_time,
     background_values: dict,
     timed_sections: dict,
     drug_values: dict,
     microbiology_values: dict,
     outcome_values: dict,
 ) -> dict:
-    los_hours, los_days = calculate_length_of_stay(admission_datetime, discharge_datetime)
+    los_hours, los_days = calculate_length_of_stay(
+        admission_time,
+        discharge_day,
+        discharge_time,
+    )
 
     record = {
         "Patient_ID": patient_id.strip(),
-        "Admission_Datetime": admission_datetime,
-        "Discharge_Datetime": discharge_datetime,
+        "Admission_Month": admission_month,
+        "Admission_Year": admission_year,
+        "Admission_Time": admission_time,
+        "Discharge_Day": discharge_day,
+        "Discharge_Time": discharge_time,
         "Length_of_Stay_hours": los_hours,
         "Length_of_Stay_days": los_days,
     }
@@ -658,18 +741,30 @@ def build_record(
 
             if not values.get("performed", True):
                 record[f"{safe_label}_Performed"] = False
-                record[f"{safe_label}_Datetime"] = None
+                record[f"{safe_label}_Day"] = None
+                record[f"{safe_label}_Time"] = None
                 record[f"{safe_label}_Time_hrs"] = None
+
             else:
-                event_dt = combine_date_and_time(values["date"], values["time"])
-                hours = calculate_hours_from_admission(admission_datetime, event_dt)
+                hours = calculate_hours_from_admission(
+                    admission_time,
+                    values["day"],
+                    values["time"],
+                )
+
                 record[f"{safe_label}_Performed"] = True
-                record[f"{safe_label}_Datetime"] = event_dt
+                record[f"{safe_label}_Day"] = values["day"]
+                record[f"{safe_label}_Time"] = values["time"]
                 record[f"{safe_label}_Time_hrs"] = hours
 
-    record["Steroids_given"] = serialise_multiselect(drug_values.get("steroids_given", []))
+    record["Steroids_given"] = serialise_multiselect(
+        drug_values.get("steroids_given", [])
+    )
     record["Steroids_other"] = drug_values.get("steroids_other", "")
-    record["Antibiotics_given"] = serialise_multiselect(drug_values.get("antibiotics_given", []))
+
+    record["Antibiotics_given"] = serialise_multiselect(
+        drug_values.get("antibiotics_given", [])
+    )
     record["Antibiotics_other"] = drug_values.get("antibiotics_other", "")
 
     record.update(microbiology_values)
@@ -679,14 +774,14 @@ def build_record(
 
 
 # =========================
-# Save Function
+# Save function
 # =========================
 def normalise_value_for_sheet(value):
     if isinstance(value, datetime):
         return value.isoformat(sep=" ", timespec="minutes")
 
-    if isinstance(value, date):
-        return value.isoformat()
+    if isinstance(value, time):
+        return value.isoformat(timespec="minutes")
 
     if value is None:
         return ""
@@ -695,13 +790,16 @@ def normalise_value_for_sheet(value):
 
 
 def save_to_google_sheets(data_dict):
+    ws = get_sheet()
     headers = ws.row_values(1)
 
     if not headers:
         headers = ["timestamp"] + list(data_dict.keys())
         ws.append_row(headers)
+
     else:
         missing_headers = [key for key in data_dict.keys() if key not in headers]
+
         if "timestamp" not in headers:
             missing_headers = ["timestamp"] + missing_headers
 
@@ -710,6 +808,7 @@ def save_to_google_sheets(data_dict):
             ws.update("1:1", [headers])
 
     row = []
+
     for h in headers:
         if h == "timestamp":
             row.append(datetime.now().isoformat(sep=" ", timespec="minutes"))
@@ -723,11 +822,24 @@ def save_to_google_sheets(data_dict):
 # Main app
 # =========================
 def main() -> None:
+    st.set_page_config(page_title=APP_TITLE, layout="wide")
+
+    if not check_password():
+        st.stop()
+
     initialise_state()
     handle_pending_reset()
     render_header()
 
-    patient_id, admission_month, admission_year, admission_time, discharge_day, discharge_time = render_patient_section()
+    (
+        patient_id,
+        admission_month,
+        admission_year,
+        admission_time,
+        discharge_day,
+        discharge_time,
+    ) = render_patient_section()
+
     background_values = render_background_section()
 
     timed_section_values = {}
@@ -740,7 +852,8 @@ def main() -> None:
 
     if st.button("Submit Record"):
         if not patient_id.strip():
-            st.error("Please enter a Research ID ")
+            st.error("Please enter a Research ID.")
+
         else:
             los_hours, _ = calculate_length_of_stay(
                 admission_time,
@@ -750,8 +863,10 @@ def main() -> None:
 
             if los_hours is None:
                 st.error("Please enter discharge day and discharge time.")
+
             elif los_hours < 0:
                 st.error("Discharge time cannot be before admission time.")
+
             else:
                 record = build_record(
                     patient_id,
