@@ -911,12 +911,10 @@ def render_timed_section(section_name: str, items: list) -> dict:
         col_left, col_right = st.columns(2)
 
         with col_left:
-            st.markdown("### Core treatments")
             for item in left_items:
                 values[item["key"]] = render_timed_row(item["label"], item["key"])
 
         with col_right:
-            st.markdown("### Other treatments")
             for item in right_items:
                 values[item["key"]] = render_timed_row(item["label"], item["key"])
 
@@ -976,40 +974,41 @@ def render_outcome_section() -> dict:
     with st.container(border=True):
         st.markdown("### Admission outcome")
 
-        col1, col2 = st.columns(2)
+        values["highest_respiratory_support"] = st.selectbox(
+            "Highest Level of Respiratory Support Required",
+            options=RESPIRATORY_SUPPORT_OPTIONS,
+            key="highest_respiratory_support",
+        )
 
-        with col1:
-            values["highest_respiratory_support"] = st.selectbox(
-                "Highest Level of Respiratory Support Required",
-                options=RESPIRATORY_SUPPORT_OPTIONS,
-                key="highest_respiratory_support",
-            )
+        ocol1, ocol2, ocol3, ocol4 = st.columns(4)
 
+        with ocol1:
             values["picu_admission"] = st.checkbox(
                 "PICU Admission",
                 key="picu_admission",
             )
 
-        with col2:
+        with ocol2:
             values["developed_atelectasis"] = st.checkbox(
                 "Developed Atelectasis",
                 key="developed_atelectasis",
             )
 
+        with ocol3:
             values["death"] = st.checkbox(
                 "Death",
                 key="death",
             )
 
-        st.divider()
-        st.markdown("### Readmission")
-
-        values["readmitted"] = st.checkbox(
-            "Readmitted after discharge",
-            key="readmitted",
-        )
+        with ocol4:
+            values["readmitted"] = st.checkbox(
+                "Readmitted",
+                key="readmitted",
+            )
 
         if values["readmitted"]:
+            st.markdown("**Readmission details**")
+
             rcol1, rcol2 = st.columns(2)
 
             with rcol1:
@@ -1050,6 +1049,7 @@ def render_outcome_section() -> dict:
             values["readmission_notes"] = ""
 
     return values
+
 
 
 def render_saved_data_section() -> None:
