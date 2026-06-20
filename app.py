@@ -130,9 +130,10 @@ SECTIONS = {
         {"label": "Exchange Transfusion", "key": "exchange_transfusion"},
         {"label": "Respiratory Physiotherapy", "key": "respiratory_pt"},
     ],
-    "Discussions": [
+    "Discussions / Referrals": [
         {"label": "Discussion with Haematology", "key": "haematology_discussion"},
         {"label": "Discussion with ICU", "key": "icu_discussion"},
+        {"label": "Respiratory Referral / Review", "key": "respiratory_referral"},
     ],
 }
 
@@ -228,6 +229,7 @@ def reset_form_state() -> None:
     st.session_state["steroids_given"] = []
     st.session_state["steroids_other"] = ""
     st.session_state["steroid_max_dose_mg_per_kg"] = 0.0
+    st.session_state["steroid_total_duration_days"] = 0
     st.session_state["steroid_weaning_protocol"] = "Unknown"
     st.session_state["steroid_wean_duration_days"] = 0
     st.session_state["steroid_notes"] = ""
@@ -356,6 +358,7 @@ def initialise_state() -> None:
         "steroids_given": [],
         "steroids_other": "",
         "steroid_max_dose_mg_per_kg": 0.0,
+        "steroid_total_duration_days": 0,
         "steroid_weaning_protocol": "Unknown",
         "steroid_wean_duration_days": 0,
         "steroid_notes": "",
@@ -516,7 +519,7 @@ def render_background_section() -> dict:
     values = {}
 
     with st.container(border=True):
-        st.markdown("### Patient phenotype")
+        st.markdown("**Patient phenotype**")
         col1, col2, col3 = st.columns(3)
 
         with col1:
@@ -550,32 +553,28 @@ def render_background_section() -> dict:
         else:
             values["genotype_other"] = ""
 
-        st.divider()
-
-        st.markdown("### Vaccination status")
+        st.markdown("**Vaccination status**")
         vacc_col1, vacc_col2, vacc_col3 = st.columns(3)
 
         with vacc_col1:
             values["influenza_vaccinated"] = st.checkbox(
-                "Influenza vaccinated",
+                "Influenza",
                 key="influenza_vaccinated",
             )
 
         with vacc_col2:
             values["pneumococcal_vaccinated"] = st.checkbox(
-                "Pneumococcal vaccinated",
+                "Pneumococcal",
                 key="pneumococcal_vaccinated",
             )
 
         with vacc_col3:
             values["hib_vaccinated"] = st.checkbox(
-                "Haemophilus influenzae type B vaccinated",
+                "Haemophilus influenzae type B",
                 key="hib_vaccinated",
             )
 
-        st.divider()
-
-        st.markdown("### Relevant background history")
+        st.markdown("**Relevant background history**")
         hist_col1, hist_col2, hist_col3 = st.columns(3)
 
         with hist_col1:
@@ -596,9 +595,7 @@ def render_background_section() -> dict:
                 key="bone_marrow_transplant",
             )
 
-        st.divider()
-
-        st.markdown("### Background medications / programmes")
+        st.markdown("**Background medications / programmes**")
         med_col1, med_col2, med_col3 = st.columns(3)
 
         with med_col1:
@@ -625,7 +622,7 @@ def render_background_section() -> dict:
         values["background_notes"] = st.text_area(
             "Other background notes",
             key="background_notes",
-            height=90,
+            height=80,
         )
 
     return values
@@ -650,6 +647,7 @@ def empty_treatment_details(key: str) -> dict:
             "Steroids_given": "",
             "Steroids_other": "",
             "Steroid_max_dose_mg_per_kg": "",
+            "Steroid_total_duration_days": "",
             "Steroid_weaning_protocol": "",
             "Steroid_wean_duration_days": "",
             "Steroid_notes": "",
@@ -660,6 +658,12 @@ def empty_treatment_details(key: str) -> dict:
             "Antibiotics_given": "",
             "Antibiotic_dose_mg_per_kg": "",
             "Antibiotics_other": "",
+        }
+
+    if key == "respiratory_referral":
+        return {
+            "Respiratory_referral_timing": "",
+            "Respiratory_referral_notes": "",
         }
 
     return {}
@@ -753,25 +757,35 @@ def render_treatment_details(key: str) -> dict:
                 key="steroid_max_dose_mg_per_kg",
             )
 
-        col3, col4 = st.columns(2)
+        col3, col4, col5 = st.columns(3)
 
         with col3:
+            details["Steroid_total_duration_days"] = st.number_input(
+                "Total steroid duration, days",
+                min_value=0,
+                max_value=120,
+                step=1,
+                key="steroid_total_duration_days",
+            )
+
+        with col4:
             details["Steroid_weaning_protocol"] = st.selectbox(
                 "Steroid weaning approach",
                 options=STEROID_WEAN_OPTIONS,
                 key="steroid_weaning_protocol",
             )
 
-        with col4:
-            if details["Steroid_weaning_protocol"] == "Weaning course used":
-                details["Steroid_wean_duration_days"] = st.number_input(
-                    "Duration of wean, days",
-                    min_value=0,
-                    max_value=120,
-                    step=1,
-                    key="steroid_wean_duration_days",
-                )
-            else:
+        with col5:
+            details["Steroid_wean_duration_days"] = st.number_input(
+                "Wean duration, days",
+                min_value=0,
+                max_value=120,
+                step=1,
+                key="steroid_wean_duration_days",
+                disabled=details["Steroid_weaning_protocol"] != "Weaning course used",
+            )
+
+            if details["Steroid_weaning_protocol"] != "Weaning course used":
                 details["Steroid_wean_duration_days"] = ""
 
         details["Steroid_notes"] = st.text_area(
@@ -804,6 +818,26 @@ def render_treatment_details(key: str) -> dict:
             )
         else:
             details["Antibiotics_other"] = ""
+
+    elif key == "respiratory_referral":
+        st.markdown("#### Respiratory referral / review details")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            details["Respiratory_referral_timing"] = st.selectbox(
+                "Respiratory input",
+                options=RESPIRATORY_REFERRAL_TIMING_OPTIONS[1:],
+                key="respiratory_referral_timing",
+            )
+
+        with col2:
+            details["Respiratory_referral_notes"] = st.text_area(
+                "Respiratory referral / review notes",
+                key="respiratory_referral_notes",
+                height=80,
+                placeholder="Optional. For example, reviewed during admission, outpatient referral requested, or reason not referred.",
+            )
 
     return details
 
@@ -840,7 +874,7 @@ def render_timed_row(label: str, key: str) -> dict:
 
         details = empty_treatment_details(key)
 
-        if not not_done and key in {"analgesia", "steroids", "antibiotics"}:
+        if not not_done and key in {"analgesia", "steroids", "antibiotics", "respiratory_referral"}:
             st.divider()
             details = render_treatment_details(key)
 
@@ -881,33 +915,6 @@ def render_timed_section(section_name: str, items: list) -> dict:
 
     return values
 
-
-
-def render_referral_section() -> dict:
-    st.header("Referrals / Follow-up")
-    values = {}
-
-    with st.container(border=True):
-        st.markdown("### Respiratory referral / review")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            values["respiratory_referral_timing"] = st.selectbox(
-                "Respiratory input",
-                options=RESPIRATORY_REFERRAL_TIMING_OPTIONS,
-                key="respiratory_referral_timing",
-            )
-
-        with col2:
-            values["respiratory_referral_notes"] = st.text_area(
-                "Respiratory referral / review notes",
-                key="respiratory_referral_notes",
-                height=80,
-                placeholder="Optional. For example, reviewed during admission, outpatient referral requested, or reason not referred.",
-            )
-
-    return values
 
 
 def render_microbiology_section() -> dict:
@@ -1059,7 +1066,6 @@ def build_record(
     discharge_time,
     background_values: dict,
     timed_sections: dict,
-    referral_values: dict,
     microbiology_values: dict,
     outcome_values: dict,
 ) -> dict:
@@ -1111,7 +1117,6 @@ def build_record(
                 else:
                     record[detail_key] = detail_value
 
-    record.update(referral_values)
     record.update(microbiology_values)
     record.update(outcome_values)
 
@@ -1191,7 +1196,6 @@ def main() -> None:
     for section_name, items in SECTIONS.items():
         timed_section_values[section_name] = render_timed_section(section_name, items)
 
-    referral_values = render_referral_section()
     microbiology_values = render_microbiology_section()
     outcome_values = render_outcome_section()
 
@@ -1222,7 +1226,6 @@ def main() -> None:
                     discharge_time,
                     background_values,
                     timed_section_values,
-                    referral_values,
                     microbiology_values,
                     outcome_values,
                 )
