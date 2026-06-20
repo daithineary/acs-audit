@@ -367,7 +367,7 @@ def render_patient_section():
             key="discharge_time",
         )
 
-    return patient_id, admission_month, admission_year, admission_time, discharge_day, discharge_time
+    return c
 
 
 def render_background_section() -> dict:
@@ -727,7 +727,7 @@ def main() -> None:
     handle_pending_reset()
     render_header()
 
-    patient_id, admission_datetime, discharge_datetime = render_patient_section()
+    patient_id, admission_month, admission_year, admission_time, discharge_day, discharge_time = render_patient_section()
     background_values = render_background_section()
 
     timed_section_values = {}
@@ -741,13 +741,51 @@ def main() -> None:
     if st.button("Submit Record"):
         if not patient_id.strip():
             st.error("Please enter a Patient ID.")
-        elif discharge_datetime < admission_datetime:
-            st.error("Discharge date/time cannot be before admission date/time.")
+            else:
+            los_hours, _ = calculate_length_of_stay(
+                admission_time,
+                discharge_day,
+                discharge_time,
+            )
+
+            if los_hours is None:
+                st.error("Please enter discharge day and discharge time.")
+            elif los_hours < 0:
+                st.error("Discharge time cannot be before admission time.")
+            else:
+                record = build_record(
+                    patient_id,
+                    admission_month,
+                    admission_year,
+                    admission_time,
+                    discharge_day,
+                    discharge_time,
+                    background_values,
+                    timed_section_values,
+                    drug_values,
+                    microbiology_values,
+                    outcome_values,
+                )
+
+                try:
+                    save_to_google_sheets(record)
+                    load_sheet_data.clear()
+
+                    st.session_state["submitted"] = True
+                    st.session_state["reset_requested"] = True
+
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"Google Sheets save failed: {e}")
         else:
             record = build_record(
                 patient_id,
-                admission_datetime,
-                discharge_datetime,
+                admission_month,
+                admission_year,
+                admission_time,
+                discharge_day,
+                discharge_time,
                 background_values,
                 timed_section_values,
                 drug_values,
