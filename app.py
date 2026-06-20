@@ -367,7 +367,7 @@ def render_patient_section():
             key="discharge_time",
         )
 
-    return c
+    return patient_id, admission_month, admission_year, admission_time, discharge_day, discharge_time
 
 
 def render_background_section() -> dict:
