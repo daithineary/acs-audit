@@ -210,6 +210,7 @@ def reset_form_state() -> None:
     st.session_state["hydroxyurea"] = False
     st.session_state["folic_acid"] = False
     st.session_state["vitamin_d"] = False
+    st.session_state["phenoxymethylpenicillin_calvepen"] = False
     st.session_state["regular_transfusion_programme"] = False
     st.session_state["regular_venesection"] = False
     st.session_state["regular_exchange_transfusion_programme"] = False
@@ -340,6 +341,7 @@ def initialise_state() -> None:
         "hydroxyurea": False,
         "folic_acid": False,
         "vitamin_d": False,
+        "phenoxymethylpenicillin_calvepen": False,
         "regular_transfusion_programme": False,
         "regular_venesection": False,
         "regular_exchange_transfusion_programme": False,
@@ -604,12 +606,16 @@ def render_background_section() -> dict:
 
         with med_col2:
             values["vitamin_d"] = st.checkbox("Vitamin D", key="vitamin_d")
+            values["phenoxymethylpenicillin_calvepen"] = st.checkbox(
+                "Phenoxymethylpenicillin (Calvepen)",
+                key="phenoxymethylpenicillin_calvepen",
+            )
+
+        with med_col3:
             values["regular_transfusion_programme"] = st.checkbox(
                 "Regular transfusion programme",
                 key="regular_transfusion_programme",
             )
-
-        with med_col3:
             values["regular_venesection"] = st.checkbox(
                 "Regular venesection",
                 key="regular_venesection",
