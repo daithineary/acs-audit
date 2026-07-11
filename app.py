@@ -152,6 +152,7 @@ SECTIONS = {
         {"label": "Oxygen", "key": "oxygen"},
         {"label": "Fluids", "key": "fluids"},
         {"label": "Bronchodilators", "key": "bronchodilators"},
+        {"label": "Incentive Spirometry", "key": "incentive_spirometry"},
         {"label": "Simple Transfusion", "key": "simple_transfusion"},
         {"label": "Exchange Transfusion", "key": "exchange_transfusion"},
     ],
@@ -179,6 +180,9 @@ BACKGROUND_YN_FIELDS = [
     "regular_transfusion_programme",
     "regular_venesection",
     "regular_exchange_transfusion_programme",
+    "iron_chelator_desferal",
+    "iron_chelator_exjade",
+    "iron_chelator_deferiprone",
     "hydroxyurea_continued",
 ]
 
@@ -721,6 +725,9 @@ def initialise_state() -> None:
         "regular_transfusion_programme": None,
         "regular_venesection": None,
         "regular_exchange_transfusion_programme": None,
+        "iron_chelator_desferal": None,
+        "iron_chelator_exjade": None,
+        "iron_chelator_deferiprone": None,
         "hydroxyurea_continued": None,
         "background_notes": "",
 
@@ -1195,6 +1202,27 @@ def render_background_section() -> dict:
             values["regular_exchange_transfusion_programme"] = yes_no_button(
                 "Regular exchange transfusion programme",
                 key="regular_exchange_transfusion_programme",
+            )
+
+        st.markdown("**Iron chelation**")
+        chel_col1, chel_col2, chel_col3 = st.columns(3)
+
+        with chel_col1:
+            values["iron_chelator_desferal"] = yes_no_button(
+                "Desferal (Deferoxamine)",
+                key="iron_chelator_desferal",
+            )
+
+        with chel_col2:
+            values["iron_chelator_exjade"] = yes_no_button(
+                "Exjade (Deferasirox)",
+                key="iron_chelator_exjade",
+            )
+
+        with chel_col3:
+            values["iron_chelator_deferiprone"] = yes_no_button(
+                "Deferiprone",
+                key="iron_chelator_deferiprone",
             )
 
         if values["hydroxyurea"] == "Yes":
