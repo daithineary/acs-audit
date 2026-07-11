@@ -179,6 +179,7 @@ BACKGROUND_YN_FIELDS = [
     "regular_transfusion_programme",
     "regular_venesection",
     "regular_exchange_transfusion_programme",
+    "hydroxyurea_continued",
 ]
 
 
@@ -303,8 +304,17 @@ def reset_form_state() -> None:
 
     st.session_state["bloods_tests"] = []
     st.session_state["hb_at_admission"] = None
+    st.session_state["repeat_bloods_performed"] = None
+    st.session_state["repeat_bloods_days"] = None
 
     st.session_state["cultures_sent"] = []
+
+    st.session_state["pre_transfusion_hb"] = None
+    st.session_state["post_transfusion_hb"] = None
+
+    st.session_state["pre_exchange_hb"] = None
+    st.session_state["post_exchange_hbs_percent"] = None
+    st.session_state["exchange_volume_ml_per_kg"] = None
 
     st.session_state["temperature_at_admission"] = None
     st.session_state["respiratory_rate_at_admission"] = None
@@ -555,15 +565,6 @@ def apply_record_to_session_state(record: dict) -> None:
     st.session_state["cxr_changes"] = parse_yn_from_sheet(record.get("CXR_Changes"))
     st.session_state["cxr_findings_notes"] = record.get("CXR_Findings_Notes", "")
 
-    # Bloods
-    st.session_state["bloods_tests"] = parse_multiselect(record.get("Bloods_Tests"), BLOODS_OPTIONS)
-    hb_val = record.get("Hb_at_Admission")
-    st.session_state["hb_at_admission"] = float(hb_val) if hb_val not in (None, "") else None
-
-    # Cultures
-    st.session_state["cultures_sent"] = parse_multiselect(record.get("Cultures_Sent"), CULTURES_OPTIONS)
-
-    # Admission observations
     def _load_optional_float(field_name):
         val = record.get(field_name)
         return float(val) if val not in (None, "") else None
@@ -575,6 +576,24 @@ def apply_record_to_session_state(record: dict) -> None:
         except (TypeError, ValueError):
             return None
 
+    # Bloods
+    st.session_state["bloods_tests"] = parse_multiselect(record.get("Bloods_Tests"), BLOODS_OPTIONS)
+    st.session_state["hb_at_admission"] = _load_optional_float("Hb_at_Admission")
+    st.session_state["repeat_bloods_performed"] = parse_yn_from_sheet(record.get("Repeat_Bloods_Performed"))
+    st.session_state["repeat_bloods_days"] = _load_optional_int("Repeat_Bloods_Days")
+
+    # Cultures
+    st.session_state["cultures_sent"] = parse_multiselect(record.get("Cultures_Sent"), CULTURES_OPTIONS)
+
+    # Transfusion targets
+    st.session_state["pre_transfusion_hb"] = _load_optional_float("Pre_Transfusion_Hb")
+    st.session_state["post_transfusion_hb"] = _load_optional_float("Post_Transfusion_Hb")
+
+    st.session_state["pre_exchange_hb"] = _load_optional_float("Pre_Exchange_Hb")
+    st.session_state["post_exchange_hbs_percent"] = _load_optional_float("Post_Exchange_HbS_Percent")
+    st.session_state["exchange_volume_ml_per_kg"] = _load_optional_float("Exchange_Volume_mL_per_kg")
+
+    # Admission observations
     st.session_state["temperature_at_admission"] = _load_optional_float("temperature_at_admission")
     st.session_state["respiratory_rate_at_admission"] = _load_optional_int("respiratory_rate_at_admission")
     st.session_state["o2_sats_at_admission"] = _load_optional_int("o2_sats_at_admission")
@@ -687,6 +706,7 @@ def initialise_state() -> None:
         "regular_transfusion_programme": None,
         "regular_venesection": None,
         "regular_exchange_transfusion_programme": None,
+        "hydroxyurea_continued": None,
         "background_notes": "",
 
         "steroids_given": [],
@@ -713,8 +733,17 @@ def initialise_state() -> None:
 
         "bloods_tests": [],
         "hb_at_admission": None,
+        "repeat_bloods_performed": None,
+        "repeat_bloods_days": None,
 
         "cultures_sent": [],
+
+        "pre_transfusion_hb": None,
+        "post_transfusion_hb": None,
+
+        "pre_exchange_hb": None,
+        "post_exchange_hbs_percent": None,
+        "exchange_volume_ml_per_kg": None,
 
         "temperature_at_admission": None,
         "respiratory_rate_at_admission": None,
@@ -1148,6 +1177,14 @@ def render_background_section() -> dict:
                 key="regular_exchange_transfusion_programme",
             )
 
+        if values["hydroxyurea"] == "Yes":
+            values["hydroxyurea_continued"] = yes_no_button(
+                "Hydroxyurea continued during this admission?",
+                key="hydroxyurea_continued",
+            )
+        else:
+            values["hydroxyurea_continued"] = None
+
         values["background_notes"] = st.text_area(
             "Other background notes",
             key="background_notes",
@@ -1197,6 +1234,8 @@ def empty_treatment_details(key: str) -> dict:
         return {
             "Bloods_Tests": "",
             "Hb_at_Admission": "",
+            "Repeat_Bloods_Performed": "",
+            "Repeat_Bloods_Days": "",
         }
 
     if key == "cultures":
@@ -1209,6 +1248,19 @@ def empty_treatment_details(key: str) -> dict:
             "Antiviral_Drug": "",
             "Antiviral_Dose_mg_per_kg": "",
             "Antiviral_Other": "",
+        }
+
+    if key == "simple_transfusion":
+        return {
+            "Pre_Transfusion_Hb": "",
+            "Post_Transfusion_Hb": "",
+        }
+
+    if key == "exchange_transfusion":
+        return {
+            "Pre_Exchange_Hb": "",
+            "Post_Exchange_HbS_Percent": "",
+            "Exchange_Volume_mL_per_kg": "",
         }
 
     return {}
@@ -1475,6 +1527,26 @@ def render_treatment_details(key: str) -> dict:
                 key="hb_at_admission",
             )
 
+        st.markdown("**Daily repeat bloods**")
+        rcol1, rcol2 = st.columns(2)
+
+        with rcol1:
+            repeat_bloods_yn = yes_no_button(
+                "Repeat FBC/electrolytes performed daily until improvement?",
+                key="repeat_bloods_performed",
+            )
+            details["Repeat_Bloods_Performed"] = repeat_bloods_yn
+
+        with rcol2:
+            details["Repeat_Bloods_Days"] = st.number_input(
+                "Number of days repeated",
+                min_value=0,
+                max_value=60,
+                step=1,
+                key="repeat_bloods_days",
+                disabled=repeat_bloods_yn != "Yes",
+            )
+
     elif key == "cultures":
         st.markdown("#### Cultures details")
 
@@ -1514,6 +1586,63 @@ def render_treatment_details(key: str) -> dict:
             )
         else:
             details["Antiviral_Other"] = ""
+
+    elif key == "simple_transfusion":
+        st.markdown("#### Simple transfusion details")
+        st.caption("Guideline target: top-up to Hb 10 g/dL if O2 sats <95%.")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            details["Pre_Transfusion_Hb"] = st.number_input(
+                "Pre-transfusion Hb, g/dL",
+                min_value=0.0,
+                max_value=25.0,
+                step=0.1,
+                key="pre_transfusion_hb",
+            )
+
+        with col2:
+            details["Post_Transfusion_Hb"] = st.number_input(
+                "Post-transfusion Hb, g/dL",
+                min_value=0.0,
+                max_value=25.0,
+                step=0.1,
+                key="post_transfusion_hb",
+            )
+
+    elif key == "exchange_transfusion":
+        st.markdown("#### Exchange transfusion details")
+        st.caption("Guideline target: 1 volume exchange (40 mL/kg RCC) to achieve HbS <30%.")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            details["Pre_Exchange_Hb"] = st.number_input(
+                "Pre-exchange Hb, g/dL",
+                min_value=0.0,
+                max_value=25.0,
+                step=0.1,
+                key="pre_exchange_hb",
+            )
+
+        with col2:
+            details["Post_Exchange_HbS_Percent"] = st.number_input(
+                "Post-exchange HbS, %",
+                min_value=0.0,
+                max_value=100.0,
+                step=0.1,
+                key="post_exchange_hbs_percent",
+            )
+
+        with col3:
+            details["Exchange_Volume_mL_per_kg"] = st.number_input(
+                "Volume exchanged, mL/kg",
+                min_value=0.0,
+                max_value=200.0,
+                step=1.0,
+                key="exchange_volume_ml_per_kg",
+            )
 
     return details
 
@@ -1564,6 +1693,7 @@ def render_timed_row(label: str, key: str) -> dict:
         if performed_yes and key in {
             "analgesia", "steroids", "antibiotics", "respiratory_referral",
             "cxr", "bloods", "cultures", "antivirals",
+            "simple_transfusion", "exchange_transfusion",
         }:
             st.divider()
             details = render_treatment_details(key)
@@ -1831,7 +1961,7 @@ def build_record(
             for detail_key, detail_value in values.get("details", {}).items():
                 if detail_key == "Analgesia_Entries":
                     continue
-                elif detail_key == "CXR_Changes":
+                elif detail_key in ("CXR_Changes", "Repeat_Bloods_Performed"):
                     record[detail_key] = yn_to_bool(detail_value)
                 elif isinstance(detail_value, list):
                     record[detail_key] = serialise_multiselect(detail_value)
