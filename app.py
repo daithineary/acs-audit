@@ -85,6 +85,7 @@ ANTIBIOTIC_OPTIONS = [
     "Cefotaxime",
     "Piperacillin-tazobactam / Tazocin",
     "Clarithromycin",
+    "Erythromycin",
     "Azithromycin",
     "Vancomycin",
     "Gentamicin",
@@ -114,6 +115,27 @@ BACTERIA_OPTIONS = [
     "Other",
 ]
 
+BLOODS_OPTIONS = [
+    "FBC",
+    "Reticulocyte count",
+    "Renal / Electrolytes",
+    "LDH",
+    "CRP",
+]
+
+CULTURES_OPTIONS = [
+    "Blood cultures",
+    "Sputum cultures",
+    "Nasopharyngeal aspirate",
+    "Respiratory viral serology (including Chlamydia)",
+]
+
+ANTIVIRAL_OPTIONS = [
+    "Not used",
+    "Oseltamivir",
+    "Other",
+]
+
 SECTIONS = {
     "Investigations": [
         {"label": "Bloods", "key": "bloods"},
@@ -126,6 +148,7 @@ SECTIONS = {
         {"label": "Analgesia", "key": "analgesia"},
         {"label": "Steroids", "key": "steroids"},
         {"label": "Antibiotics", "key": "antibiotics"},
+        {"label": "Antivirals", "key": "antivirals"},
         {"label": "Oxygen", "key": "oxygen"},
         {"label": "Fluids", "key": "fluids"},
         {"label": "Bronchodilators", "key": "bronchodilators"},
@@ -141,6 +164,22 @@ SECTIONS = {
 }
 
 ALL_TIMED_ITEMS = [item for section in SECTIONS.values() for item in section]
+
+BACKGROUND_YN_FIELDS = [
+    "influenza_vaccinated",
+    "pneumococcal_vaccinated",
+    "hib_vaccinated",
+    "splenectomy",
+    "liver_transplant",
+    "bone_marrow_transplant",
+    "hydroxyurea",
+    "folic_acid",
+    "vitamin_d",
+    "phenoxymethylpenicillin_calvepen",
+    "regular_transfusion_programme",
+    "regular_venesection",
+    "regular_exchange_transfusion_programme",
+]
 
 
 # =========================
@@ -228,28 +267,15 @@ def reset_form_state() -> None:
     st.session_state["genotype"] = "Unknown"
     st.session_state["genotype_other"] = ""
 
-    st.session_state["influenza_vaccinated"] = False
-    st.session_state["pneumococcal_vaccinated"] = False
-    st.session_state["hib_vaccinated"] = False
-
-    st.session_state["splenectomy"] = False
-    st.session_state["liver_transplant"] = False
-    st.session_state["bone_marrow_transplant"] = False
-
-    st.session_state["hydroxyurea"] = False
-    st.session_state["folic_acid"] = False
-    st.session_state["vitamin_d"] = False
-    st.session_state["phenoxymethylpenicillin_calvepen"] = False
-    st.session_state["regular_transfusion_programme"] = False
-    st.session_state["regular_venesection"] = False
-    st.session_state["regular_exchange_transfusion_programme"] = False
+    for field in BACKGROUND_YN_FIELDS:
+        st.session_state[field] = None
     st.session_state["background_notes"] = ""
 
     for item in ALL_TIMED_ITEMS:
         key = item["key"]
         st.session_state[f"{key}_day"] = 0
         st.session_state[f"{key}_time"] = now.time()
-        st.session_state[f"{key}_performed"] = False
+        st.session_state[f"{key}_performed"] = None
 
     reset_analgesia_entries(now.time())
 
@@ -265,19 +291,39 @@ def reset_form_state() -> None:
     st.session_state["antibiotic_dose_mg_per_kg"] = ""
     st.session_state["antibiotics_other"] = ""
 
+    st.session_state["antiviral_drug"] = "Not used"
+    st.session_state["antiviral_dose_mg_per_kg"] = 0.0
+    st.session_state["antiviral_other"] = ""
+
     st.session_state["respiratory_referral_timing"] = "Not referred"
     st.session_state["respiratory_referral_notes"] = ""
 
+    st.session_state["cxr_changes"] = None
+    st.session_state["cxr_findings_notes"] = ""
+
+    st.session_state["bloods_tests"] = []
+    st.session_state["hb_at_admission"] = None
+
+    st.session_state["cultures_sent"] = []
+
+    st.session_state["temperature_at_admission"] = None
+    st.session_state["respiratory_rate_at_admission"] = None
+    st.session_state["o2_sats_at_admission"] = None
+    st.session_state["pain_score_at_admission"] = None
+
+    st.session_state["four_hourly_obs_performed"] = None
+    st.session_state["four_hourly_obs_duration_hours"] = None
+
     st.session_state["highest_respiratory_support"] = "None"
-    st.session_state["bacterium_isolated"] = False
+    st.session_state["bacterium_isolated"] = None
     st.session_state["bacterium"] = "None isolated"
     st.session_state["bacterium_other"] = ""
 
-    st.session_state["picu_admission"] = False
-    st.session_state["developed_atelectasis"] = False
-    st.session_state["death"] = False
+    st.session_state["picu_admission"] = None
+    st.session_state["developed_atelectasis"] = None
+    st.session_state["death"] = None
 
-    st.session_state["readmitted"] = False
+    st.session_state["readmitted"] = None
     st.session_state["weeks_to_readmission"] = 0.0
     st.session_state["readmission_reason"] = "Unknown"
     st.session_state["readmission_reason_other"] = ""
@@ -346,6 +392,46 @@ def parse_bool(value) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes"}
 
 
+def yes_no_button(label: str, key: str, **kwargs):
+    """Render a Yes/No button selector with NO default selection.
+    Returns 'Yes', 'No', or None if the person hasn't answered yet.
+    Unanswered stays visually distinct from 'No' - it is not pre-filled."""
+    return st.radio(label, options=["Yes", "No"], key=key, index=None, horizontal=True, **kwargs)
+
+
+def yn_to_bool(value):
+    """Convert a Yes/No/None widget value to True/False/None for storage."""
+    if value == "Yes":
+        return True
+    if value == "No":
+        return False
+    return None
+
+
+def bool_to_yn(value):
+    """Convert a stored True/False/None value back to 'Yes'/'No'/None for the widget."""
+    if value is True:
+        return "Yes"
+    if value is False:
+        return "No"
+    return None
+
+
+def parse_yn_from_sheet(value):
+    """Parse a saved sheet cell (which may be blank, 'True'/'False', or already
+    'Yes'/'No') back into 'Yes'/'No'/None for populating a Yes/No button widget."""
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text == "":
+        return None
+    if text in {"true", "yes", "1"}:
+        return "Yes"
+    if text in {"false", "no", "0"}:
+        return "No"
+    return None
+
+
 def parse_int(value, default=0):
     try:
         if value is None or str(value).strip() == "":
@@ -412,14 +498,8 @@ def apply_record_to_session_state(record: dict) -> None:
 
     st.session_state["genotype_other"] = record.get("genotype_other", "")
 
-    for k in [
-        "influenza_vaccinated", "pneumococcal_vaccinated", "hib_vaccinated",
-        "splenectomy", "liver_transplant", "bone_marrow_transplant",
-        "hydroxyurea", "folic_acid", "vitamin_d",
-        "phenoxymethylpenicillin_calvepen", "regular_transfusion_programme",
-        "regular_venesection", "regular_exchange_transfusion_programme",
-    ]:
-        st.session_state[k] = parse_bool(record.get(k))
+    for k in BACKGROUND_YN_FIELDS:
+        st.session_state[k] = parse_yn_from_sheet(record.get(k))
 
     st.session_state["background_notes"] = record.get("background_notes", "")
 
@@ -430,7 +510,7 @@ def apply_record_to_session_state(record: dict) -> None:
             label = item["label"]
             safe_label = label.replace(" ", "_").replace("/", "_")
 
-            st.session_state[f"{key}_performed"] = parse_bool(record.get(f"{safe_label}_Performed"))
+            st.session_state[f"{key}_performed"] = parse_yn_from_sheet(record.get(f"{safe_label}_Performed"))
             st.session_state[f"{key}_day"] = parse_int(record.get(f"{safe_label}_Day"), 0)
             st.session_state[f"{key}_time"] = parse_time_value(
                 record.get(f"{safe_label}_Time"), admission_time
@@ -457,6 +537,12 @@ def apply_record_to_session_state(record: dict) -> None:
     st.session_state["antibiotic_dose_mg_per_kg"] = record.get("Antibiotic_dose_mg_per_kg", "")
     st.session_state["antibiotics_other"] = record.get("Antibiotics_other", "")
 
+    # Antivirals
+    antiviral_drug = record.get("Antiviral_Drug", "Not used")
+    st.session_state["antiviral_drug"] = antiviral_drug if antiviral_drug in ANTIVIRAL_OPTIONS else "Not used"
+    st.session_state["antiviral_dose_mg_per_kg"] = parse_float(record.get("Antiviral_Dose_mg_per_kg"), 0.0)
+    st.session_state["antiviral_other"] = record.get("Antiviral_Other", "")
+
     # Respiratory referral
     resp_timing = record.get("Respiratory_referral_timing", "Not referred")
     st.session_state["respiratory_referral_timing"] = (
@@ -465,8 +551,40 @@ def apply_record_to_session_state(record: dict) -> None:
     )
     st.session_state["respiratory_referral_notes"] = record.get("Respiratory_referral_notes", "")
 
+    # CXR
+    st.session_state["cxr_changes"] = parse_yn_from_sheet(record.get("CXR_Changes"))
+    st.session_state["cxr_findings_notes"] = record.get("CXR_Findings_Notes", "")
+
+    # Bloods
+    st.session_state["bloods_tests"] = parse_multiselect(record.get("Bloods_Tests"), BLOODS_OPTIONS)
+    hb_val = record.get("Hb_at_Admission")
+    st.session_state["hb_at_admission"] = float(hb_val) if hb_val not in (None, "") else None
+
+    # Cultures
+    st.session_state["cultures_sent"] = parse_multiselect(record.get("Cultures_Sent"), CULTURES_OPTIONS)
+
+    # Admission observations
+    def _load_optional_float(field_name):
+        val = record.get(field_name)
+        return float(val) if val not in (None, "") else None
+
+    def _load_optional_int(field_name):
+        val = record.get(field_name)
+        try:
+            return int(float(val)) if val not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    st.session_state["temperature_at_admission"] = _load_optional_float("temperature_at_admission")
+    st.session_state["respiratory_rate_at_admission"] = _load_optional_int("respiratory_rate_at_admission")
+    st.session_state["o2_sats_at_admission"] = _load_optional_int("o2_sats_at_admission")
+    st.session_state["pain_score_at_admission"] = _load_optional_int("pain_score_at_admission")
+
+    st.session_state["four_hourly_obs_performed"] = parse_yn_from_sheet(record.get("four_hourly_obs_performed"))
+    st.session_state["four_hourly_obs_duration_hours"] = _load_optional_float("four_hourly_obs_duration_hours")
+
     # Microbiology
-    st.session_state["bacterium_isolated"] = parse_bool(record.get("bacterium_isolated"))
+    st.session_state["bacterium_isolated"] = parse_yn_from_sheet(record.get("bacterium_isolated"))
     bacterium = record.get("bacterium", "None isolated")
     st.session_state["bacterium"] = bacterium if bacterium in BACTERIA_OPTIONS else "None isolated"
     st.session_state["bacterium_other"] = record.get("bacterium_other", "")
@@ -476,10 +594,10 @@ def apply_record_to_session_state(record: dict) -> None:
     st.session_state["highest_respiratory_support"] = (
         resp_support if resp_support in RESPIRATORY_SUPPORT_OPTIONS else "None"
     )
-    st.session_state["picu_admission"] = parse_bool(record.get("picu_admission"))
-    st.session_state["developed_atelectasis"] = parse_bool(record.get("developed_atelectasis"))
-    st.session_state["death"] = parse_bool(record.get("death"))
-    st.session_state["readmitted"] = parse_bool(record.get("readmitted"))
+    st.session_state["picu_admission"] = parse_yn_from_sheet(record.get("picu_admission"))
+    st.session_state["developed_atelectasis"] = parse_yn_from_sheet(record.get("developed_atelectasis"))
+    st.session_state["death"] = parse_yn_from_sheet(record.get("death"))
+    st.session_state["readmitted"] = parse_yn_from_sheet(record.get("readmitted"))
     st.session_state["weeks_to_readmission"] = parse_float(record.get("weeks_to_readmission"), 0.0)
 
     readmission_reason = record.get("readmission_reason", "Unknown")
@@ -554,21 +672,21 @@ def initialise_state() -> None:
         "genotype": "Unknown",
         "genotype_other": "",
 
-        "influenza_vaccinated": False,
-        "pneumococcal_vaccinated": False,
-        "hib_vaccinated": False,
+        "influenza_vaccinated": None,
+        "pneumococcal_vaccinated": None,
+        "hib_vaccinated": None,
 
-        "splenectomy": False,
-        "liver_transplant": False,
-        "bone_marrow_transplant": False,
+        "splenectomy": None,
+        "liver_transplant": None,
+        "bone_marrow_transplant": None,
 
-        "hydroxyurea": False,
-        "folic_acid": False,
-        "vitamin_d": False,
-        "phenoxymethylpenicillin_calvepen": False,
-        "regular_transfusion_programme": False,
-        "regular_venesection": False,
-        "regular_exchange_transfusion_programme": False,
+        "hydroxyurea": None,
+        "folic_acid": None,
+        "vitamin_d": None,
+        "phenoxymethylpenicillin_calvepen": None,
+        "regular_transfusion_programme": None,
+        "regular_venesection": None,
+        "regular_exchange_transfusion_programme": None,
         "background_notes": "",
 
         "steroids_given": [],
@@ -583,19 +701,39 @@ def initialise_state() -> None:
         "antibiotic_dose_mg_per_kg": "",
         "antibiotics_other": "",
 
+        "antiviral_drug": "Not used",
+        "antiviral_dose_mg_per_kg": 0.0,
+        "antiviral_other": "",
+
         "respiratory_referral_timing": "Not referred",
         "respiratory_referral_notes": "",
 
+        "cxr_changes": None,
+        "cxr_findings_notes": "",
+
+        "bloods_tests": [],
+        "hb_at_admission": None,
+
+        "cultures_sent": [],
+
+        "temperature_at_admission": None,
+        "respiratory_rate_at_admission": None,
+        "o2_sats_at_admission": None,
+        "pain_score_at_admission": None,
+
+        "four_hourly_obs_performed": None,
+        "four_hourly_obs_duration_hours": None,
+
         "highest_respiratory_support": "None",
-        "bacterium_isolated": False,
+        "bacterium_isolated": None,
         "bacterium": "None isolated",
         "bacterium_other": "",
 
-        "picu_admission": False,
-        "developed_atelectasis": False,
-        "death": False,
+        "picu_admission": None,
+        "developed_atelectasis": None,
+        "death": None,
 
-        "readmitted": False,
+        "readmitted": None,
         "weeks_to_readmission": 0.0,
         "readmission_reason": "Unknown",
         "readmission_reason_other": "",
@@ -616,7 +754,7 @@ def initialise_state() -> None:
             st.session_state[f"{key}_time"] = st.session_state["admission_time"]
 
         if f"{key}_performed" not in st.session_state:
-            st.session_state[f"{key}_performed"] = False
+            st.session_state[f"{key}_performed"] = None
 
     ensure_analgesia_entries_initialised()
 
@@ -836,6 +974,71 @@ def render_patient_section():
     return patient_id, admission_month, admission_year, admission_time, discharge_day, discharge_time
 
 
+def render_admission_observations_section() -> dict:
+    st.header("Admission Observations")
+    values = {}
+
+    with st.container(border=True):
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            values["temperature_at_admission"] = st.number_input(
+                "Temperature, °C",
+                min_value=30.0,
+                max_value=43.0,
+                step=0.1,
+                key="temperature_at_admission",
+            )
+
+        with col2:
+            values["respiratory_rate_at_admission"] = st.number_input(
+                "Respiratory rate, breaths/min",
+                min_value=0,
+                max_value=100,
+                step=1,
+                key="respiratory_rate_at_admission",
+            )
+
+        with col3:
+            values["o2_sats_at_admission"] = st.number_input(
+                "O2 saturation, %",
+                min_value=0,
+                max_value=100,
+                step=1,
+                key="o2_sats_at_admission",
+            )
+
+        with col4:
+            values["pain_score_at_admission"] = st.number_input(
+                "Pain score (0-10)",
+                min_value=0,
+                max_value=10,
+                step=1,
+                key="pain_score_at_admission",
+            )
+
+        st.markdown("**4-hourly observations**")
+        mcol1, mcol2 = st.columns(2)
+
+        with mcol1:
+            values["four_hourly_obs_performed"] = yes_no_button(
+                "4-hourly monitoring performed?",
+                key="four_hourly_obs_performed",
+            )
+
+        with mcol2:
+            values["four_hourly_obs_duration_hours"] = st.number_input(
+                "Duration maintained, hours",
+                min_value=0.0,
+                max_value=500.0,
+                step=1.0,
+                key="four_hourly_obs_duration_hours",
+                disabled=values["four_hourly_obs_performed"] != "Yes",
+            )
+
+    return values
+
+
 def render_background_section() -> dict:
     st.header("Background")
     values = {}
@@ -879,19 +1082,19 @@ def render_background_section() -> dict:
         vacc_col1, vacc_col2, vacc_col3 = st.columns(3)
 
         with vacc_col1:
-            values["influenza_vaccinated"] = st.checkbox(
+            values["influenza_vaccinated"] = yes_no_button(
                 "Influenza",
                 key="influenza_vaccinated",
             )
 
         with vacc_col2:
-            values["pneumococcal_vaccinated"] = st.checkbox(
+            values["pneumococcal_vaccinated"] = yes_no_button(
                 "Pneumococcal",
                 key="pneumococcal_vaccinated",
             )
 
         with vacc_col3:
-            values["hib_vaccinated"] = st.checkbox(
+            values["hib_vaccinated"] = yes_no_button(
                 "Haemophilus influenzae type B",
                 key="hib_vaccinated",
             )
@@ -900,19 +1103,19 @@ def render_background_section() -> dict:
         hist_col1, hist_col2, hist_col3 = st.columns(3)
 
         with hist_col1:
-            values["splenectomy"] = st.checkbox(
+            values["splenectomy"] = yes_no_button(
                 "Splenectomy",
                 key="splenectomy",
             )
 
         with hist_col2:
-            values["liver_transplant"] = st.checkbox(
+            values["liver_transplant"] = yes_no_button(
                 "Liver transplant",
                 key="liver_transplant",
             )
 
         with hist_col3:
-            values["bone_marrow_transplant"] = st.checkbox(
+            values["bone_marrow_transplant"] = yes_no_button(
                 "Bone marrow transplant",
                 key="bone_marrow_transplant",
             )
@@ -921,26 +1124,26 @@ def render_background_section() -> dict:
         med_col1, med_col2, med_col3 = st.columns(3)
 
         with med_col1:
-            values["hydroxyurea"] = st.checkbox("Hydroxyurea", key="hydroxyurea")
-            values["folic_acid"] = st.checkbox("Folic acid", key="folic_acid")
+            values["hydroxyurea"] = yes_no_button("Hydroxyurea", key="hydroxyurea")
+            values["folic_acid"] = yes_no_button("Folic acid", key="folic_acid")
 
         with med_col2:
-            values["vitamin_d"] = st.checkbox("Vitamin D", key="vitamin_d")
-            values["phenoxymethylpenicillin_calvepen"] = st.checkbox(
+            values["vitamin_d"] = yes_no_button("Vitamin D", key="vitamin_d")
+            values["phenoxymethylpenicillin_calvepen"] = yes_no_button(
                 "Phenoxymethylpenicillin (Calvepen)",
                 key="phenoxymethylpenicillin_calvepen",
             )
 
         with med_col3:
-            values["regular_transfusion_programme"] = st.checkbox(
+            values["regular_transfusion_programme"] = yes_no_button(
                 "Regular transfusion programme",
                 key="regular_transfusion_programme",
             )
-            values["regular_venesection"] = st.checkbox(
+            values["regular_venesection"] = yes_no_button(
                 "Regular venesection",
                 key="regular_venesection",
             )
-            values["regular_exchange_transfusion_programme"] = st.checkbox(
+            values["regular_exchange_transfusion_programme"] = yes_no_button(
                 "Regular exchange transfusion programme",
                 key="regular_exchange_transfusion_programme",
             )
@@ -982,6 +1185,30 @@ def empty_treatment_details(key: str) -> dict:
         return {
             "Respiratory_referral_timing": "",
             "Respiratory_referral_notes": "",
+        }
+
+    if key == "cxr":
+        return {
+            "CXR_Changes": "",
+            "CXR_Findings_Notes": "",
+        }
+
+    if key == "bloods":
+        return {
+            "Bloods_Tests": "",
+            "Hb_at_Admission": "",
+        }
+
+    if key == "cultures":
+        return {
+            "Cultures_Sent": "",
+        }
+
+    if key == "antivirals":
+        return {
+            "Antiviral_Drug": "",
+            "Antiviral_Dose_mg_per_kg": "",
+            "Antiviral_Other": "",
         }
 
     return {}
@@ -1209,6 +1436,85 @@ def render_treatment_details(key: str) -> dict:
                 placeholder="Optional. For example, reviewed during admission, outpatient referral requested, or reason not referred.",
             )
 
+    elif key == "cxr":
+        st.markdown("#### CXR details")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            cxr_changes_yn = yes_no_button("Any changes on CXR?", key="cxr_changes")
+            details["CXR_Changes"] = cxr_changes_yn
+
+        with col2:
+            details["CXR_Findings_Notes"] = st.text_area(
+                "Findings",
+                key="cxr_findings_notes",
+                height=80,
+                disabled=cxr_changes_yn != "Yes",
+                placeholder="Optional. E.g. new infiltrate, location, bilateral/unilateral.",
+            )
+
+    elif key == "bloods":
+        st.markdown("#### Bloods details")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            details["Bloods_Tests"] = st.multiselect(
+                "Which bloods were taken",
+                options=BLOODS_OPTIONS,
+                key="bloods_tests",
+            )
+
+        with col2:
+            details["Hb_at_Admission"] = st.number_input(
+                "Hb at admission, g/dL",
+                min_value=0.0,
+                max_value=25.0,
+                step=0.1,
+                key="hb_at_admission",
+            )
+
+    elif key == "cultures":
+        st.markdown("#### Cultures details")
+
+        details["Cultures_Sent"] = st.multiselect(
+            "Which cultures were sent",
+            options=CULTURES_OPTIONS,
+            key="cultures_sent",
+        )
+
+    elif key == "antivirals":
+        st.markdown("#### Antiviral details")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            antiviral_choice = st.selectbox(
+                "Antiviral drug",
+                options=ANTIVIRAL_OPTIONS,
+                key="antiviral_drug",
+            )
+            details["Antiviral_Drug"] = antiviral_choice
+
+        with col2:
+            details["Antiviral_Dose_mg_per_kg"] = st.number_input(
+                "Dose, mg/kg",
+                min_value=0.0,
+                max_value=100.0,
+                step=0.1,
+                key="antiviral_dose_mg_per_kg",
+                disabled=antiviral_choice == "Not used",
+            )
+
+        if antiviral_choice == "Other":
+            details["Antiviral_Other"] = st.text_input(
+                "Specify other antiviral",
+                key="antiviral_other",
+            )
+        else:
+            details["Antiviral_Other"] = ""
+
     return details
 
 
@@ -1217,15 +1523,17 @@ def render_timed_row(label: str, key: str) -> dict:
 
     with st.container(border=True):
         if show_main_day_time:
-            col1, col2, col3, col4 = st.columns([1.8, 1.1, 1.3, 1.1])
+            col1, col2, col3, col4 = st.columns([1.6, 1.4, 1.2, 1.1])
         else:
-            col1, col2 = st.columns([1.8, 1.1])
+            col1, col2 = st.columns([1.6, 1.4])
 
         with col1:
             st.markdown(f"### {label}")
 
         with col2:
-            performed = st.checkbox("Performed", key=f"{key}_performed")
+            performed_yn = yes_no_button("Performed", key=f"{key}_performed")
+
+        performed_yes = performed_yn == "Yes"
 
         if show_main_day_time:
             with col3:
@@ -1235,7 +1543,7 @@ def render_timed_row(label: str, key: str) -> dict:
                     max_value=365,
                     step=1,
                     key=f"{key}_day",
-                    disabled=not performed,
+                    disabled=not performed_yes,
                     label_visibility="collapsed",
                     help="Day 0 = day of admission. Day 1 = next day.",
                 )
@@ -1244,7 +1552,7 @@ def render_timed_row(label: str, key: str) -> dict:
                 event_time = st.time_input(
                     "Time",
                     key=f"{key}_time",
-                    disabled=not performed,
+                    disabled=not performed_yes,
                     label_visibility="collapsed",
                 )
         else:
@@ -1253,14 +1561,17 @@ def render_timed_row(label: str, key: str) -> dict:
 
         details = empty_treatment_details(key)
 
-        if performed and key in {"analgesia", "steroids", "antibiotics", "respiratory_referral"}:
+        if performed_yes and key in {
+            "analgesia", "steroids", "antibiotics", "respiratory_referral",
+            "cxr", "bloods", "cultures", "antivirals",
+        }:
             st.divider()
             details = render_treatment_details(key)
 
-    if not performed:
+    if not performed_yes:
         return {
             "label": label,
-            "performed": False,
+            "performed": performed_yn,
             "day": None,
             "time": None,
             "details": details,
@@ -1268,7 +1579,7 @@ def render_timed_row(label: str, key: str) -> dict:
 
     return {
         "label": label,
-        "performed": True,
+        "performed": performed_yn,
         "day": event_day,
         "time": event_time,
         "details": details,
@@ -1320,20 +1631,22 @@ def render_microbiology_section() -> dict:
         col1, col2 = st.columns(2)
 
         with col1:
-            values["bacterium_isolated"] = st.checkbox(
+            values["bacterium_isolated"] = yes_no_button(
                 "Bacterium isolated",
                 key="bacterium_isolated",
             )
+
+        bacterium_yes = values["bacterium_isolated"] == "Yes"
 
         with col2:
             values["bacterium"] = st.selectbox(
                 "Bacterium",
                 options=BACTERIA_OPTIONS,
                 key="bacterium",
-                disabled=not values["bacterium_isolated"],
+                disabled=not bacterium_yes,
             )
 
-        if values["bacterium_isolated"] and values["bacterium"] == "Other":
+        if bacterium_yes and values["bacterium"] == "Other":
             values["bacterium_other"] = st.text_input(
                 "Specify other bacterium",
                 key="bacterium_other",
@@ -1360,30 +1673,30 @@ def render_outcome_section() -> dict:
         ocol1, ocol2, ocol3, ocol4 = st.columns(4)
 
         with ocol1:
-            values["picu_admission"] = st.checkbox(
+            values["picu_admission"] = yes_no_button(
                 "PICU Admission",
                 key="picu_admission",
             )
 
         with ocol2:
-            values["developed_atelectasis"] = st.checkbox(
+            values["developed_atelectasis"] = yes_no_button(
                 "Developed Atelectasis",
                 key="developed_atelectasis",
             )
 
         with ocol3:
-            values["death"] = st.checkbox(
+            values["death"] = yes_no_button(
                 "Death",
                 key="death",
             )
 
         with ocol4:
-            values["readmitted"] = st.checkbox(
+            values["readmitted"] = yes_no_button(
                 "Readmitted",
                 key="readmitted",
             )
 
-        if values["readmitted"]:
+        if values["readmitted"] == "Yes":
             st.markdown("**Readmission details**")
 
             rcol1, rcol2 = st.columns(2)
@@ -1465,6 +1778,7 @@ def build_record(
     timed_sections: dict,
     microbiology_values: dict,
     outcome_values: dict,
+    admission_obs_values: dict,
 ) -> dict:
     los_hours, los_days = calculate_length_of_stay(
         admission_time,
@@ -1484,14 +1798,20 @@ def build_record(
     }
 
     record.update(background_values)
+    for field in BACKGROUND_YN_FIELDS:
+        record[field] = yn_to_bool(record.get(field))
+
+    record.update(admission_obs_values)
+    record["four_hourly_obs_performed"] = yn_to_bool(record.get("four_hourly_obs_performed"))
 
     for _, items in timed_sections.items():
         for _, values in items.items():
             label = values["label"]
             safe_label = label.replace(" ", "_").replace("/", "_")
+            performed_bool = yn_to_bool(values.get("performed"))
 
-            if not values.get("performed", True):
-                record[f"{safe_label}_Performed"] = False
+            if performed_bool is not True:
+                record[f"{safe_label}_Performed"] = performed_bool
                 record[f"{safe_label}_Day"] = None
                 record[f"{safe_label}_Time"] = None
                 record[f"{safe_label}_Time_hrs"] = None
@@ -1511,6 +1831,8 @@ def build_record(
             for detail_key, detail_value in values.get("details", {}).items():
                 if detail_key == "Analgesia_Entries":
                     continue
+                elif detail_key == "CXR_Changes":
+                    record[detail_key] = yn_to_bool(detail_value)
                 elif isinstance(detail_value, list):
                     record[detail_key] = serialise_multiselect(detail_value)
                 else:
@@ -1562,7 +1884,11 @@ def build_record(
                 record["Analgesia_Time_to_First_hrs"] = min(used_hrs) if used_hrs else None
 
     record.update(microbiology_values)
+    record["bacterium_isolated"] = yn_to_bool(record.get("bacterium_isolated"))
+
     record.update(outcome_values)
+    for field in ["picu_admission", "developed_atelectasis", "death", "readmitted"]:
+        record[field] = yn_to_bool(record.get(field))
 
     return record
 
@@ -1669,6 +1995,8 @@ def main() -> None:
         discharge_time,
     ) = render_patient_section()
 
+    admission_obs_values = render_admission_observations_section()
+
     background_values = render_background_section()
 
     timed_section_values = {}
@@ -1707,6 +2035,7 @@ def main() -> None:
                     timed_section_values,
                     microbiology_values,
                     outcome_values,
+                    admission_obs_values,
                 )
 
                 try:
