@@ -179,6 +179,31 @@ def load_sheet_data():
     return ws.get_all_records()
 
 
+def find_existing_record(patient_id: str):
+    """Look up a Research ID in the sheet. Returns the row dict, or None if not found."""
+    patient_id = (patient_id or "").strip()
+    if not patient_id:
+        return None
+
+    ws = get_sheet()
+    headers = ws.row_values(1)
+
+    if "Patient_ID" not in headers:
+        return None
+
+    col_idx = headers.index("Patient_ID") + 1
+    col_values = ws.col_values(col_idx)
+
+    for i, val in enumerate(col_values[1:], start=2):
+        if val.strip() == patient_id:
+            row_values = ws.row_values(i)
+            # pad in case the row is shorter than the header row
+            row_values += [""] * (len(headers) - len(row_values))
+            return dict(zip(headers, row_values))
+
+    return None
+
+
 # =========================
 # Reset helpers
 # =========================
@@ -186,6 +211,7 @@ def reset_form_state() -> None:
     now = datetime.now().replace(second=0, microsecond=0)
 
     st.session_state["patient_id"] = ""
+    st.session_state["editing_existing_id"] = None
 
     st.session_state["admission_month"] = MONTH_OPTIONS[now.month - 1]
     st.session_state["admission_year"] = now.year
@@ -310,6 +336,209 @@ def serialise_multiselect(values):
 
 
 # =========================
+# Parsing helpers (for loading existing records back into the form)
+# =========================
+def parse_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
+def parse_int(value, default=0):
+    try:
+        if value is None or str(value).strip() == "":
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def parse_float(value, default=0.0):
+    try:
+        if value is None or str(value).strip() == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def parse_time_value(value, fallback):
+    if not value or str(value).strip() == "":
+        return fallback
+    text = str(value).strip()
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt).time()
+        except ValueError:
+            continue
+    return fallback
+
+
+def parse_multiselect(value, options):
+    if not value:
+        return []
+    items = [v.strip() for v in str(value).split(";") if v.strip()]
+    return [item for item in items if item in options]
+
+
+def apply_record_to_session_state(record: dict) -> None:
+    """Populate session state (i.e. the form) from a previously saved sheet row."""
+    now_time = datetime.now().replace(second=0, microsecond=0).time()
+
+    st.session_state["patient_id"] = record.get("Patient_ID", "")
+
+    if record.get("Admission_Month") in MONTH_OPTIONS:
+        st.session_state["admission_month"] = record["Admission_Month"]
+
+    admission_year = parse_int(record.get("Admission_Year"), CURRENT_YEAR)
+    if admission_year in YEAR_OPTIONS:
+        st.session_state["admission_year"] = admission_year
+
+    admission_time = parse_time_value(record.get("Admission_Time"), now_time)
+    st.session_state["admission_time"] = admission_time
+
+    st.session_state["discharge_day"] = parse_int(record.get("Discharge_Day"), 0)
+    st.session_state["discharge_time"] = parse_time_value(record.get("Discharge_Time"), admission_time)
+
+    st.session_state["age_at_admission"] = parse_int(record.get("age_at_admission"), 0)
+
+    if record.get("sex") in SEX_OPTIONS:
+        st.session_state["sex"] = record["sex"]
+
+    if record.get("genotype") in GENOTYPE_OPTIONS:
+        st.session_state["genotype"] = record["genotype"]
+
+    st.session_state["genotype_other"] = record.get("genotype_other", "")
+
+    for k in [
+        "influenza_vaccinated", "pneumococcal_vaccinated", "hib_vaccinated",
+        "splenectomy", "liver_transplant", "bone_marrow_transplant",
+        "hydroxyurea", "folic_acid", "vitamin_d",
+        "phenoxymethylpenicillin_calvepen", "regular_transfusion_programme",
+        "regular_venesection", "regular_exchange_transfusion_programme",
+    ]:
+        st.session_state[k] = parse_bool(record.get(k))
+
+    st.session_state["background_notes"] = record.get("background_notes", "")
+
+    # Timed sections (Investigations, Treatment, Discussions/Referrals)
+    for section_items in SECTIONS.values():
+        for item in section_items:
+            key = item["key"]
+            label = item["label"]
+            safe_label = label.replace(" ", "_").replace("/", "_")
+
+            st.session_state[f"{key}_performed"] = parse_bool(record.get(f"{safe_label}_Performed"))
+            st.session_state[f"{key}_day"] = parse_int(record.get(f"{safe_label}_Day"), 0)
+            st.session_state[f"{key}_time"] = parse_time_value(
+                record.get(f"{safe_label}_Time"), admission_time
+            )
+
+    # Analgesia
+    for line in ["first", "second", "third"]:
+        line_val = record.get(f"Analgesia_{line}_line", "Not used")
+        st.session_state[f"analgesia_{line}_line"] = (
+            line_val if line_val in ANALGESIA_OPTIONS else "Not used"
+        )
+        st.session_state[f"analgesia_{line}_dose_mg_per_kg"] = parse_float(
+            record.get(f"Analgesia_{line}_dose_mg_per_kg"), 0.0
+        )
+        st.session_state[f"analgesia_{line}_other"] = record.get(f"Analgesia_{line}_other", "")
+
+    # Steroids
+    st.session_state["steroids_given"] = parse_multiselect(record.get("Steroids_given"), STEROID_OPTIONS)
+    st.session_state["steroids_other"] = record.get("Steroids_other", "")
+    st.session_state["steroid_max_dose_mg_per_kg"] = parse_float(record.get("Steroid_max_dose_mg_per_kg"), 0.0)
+    st.session_state["steroid_total_duration_days"] = parse_int(record.get("Steroid_total_duration_days"), 0)
+
+    weaning = record.get("Steroid_weaning_protocol", "Unknown")
+    st.session_state["steroid_weaning_protocol"] = (
+        weaning if weaning in STEROID_WEAN_OPTIONS else "Unknown"
+    )
+    st.session_state["steroid_wean_duration_days"] = parse_int(record.get("Steroid_wean_duration_days"), 0)
+    st.session_state["steroid_notes"] = record.get("Steroid_notes", "")
+
+    # Antibiotics
+    st.session_state["antibiotics_given"] = parse_multiselect(record.get("Antibiotics_given"), ANTIBIOTIC_OPTIONS)
+    st.session_state["antibiotic_dose_mg_per_kg"] = record.get("Antibiotic_dose_mg_per_kg", "")
+    st.session_state["antibiotics_other"] = record.get("Antibiotics_other", "")
+
+    # Respiratory referral
+    resp_timing = record.get("Respiratory_referral_timing", "Not referred")
+    st.session_state["respiratory_referral_timing"] = (
+        resp_timing if resp_timing in RESPIRATORY_REFERRAL_TIMING_OPTIONS[1:]
+        else RESPIRATORY_REFERRAL_TIMING_OPTIONS[1]
+    )
+    st.session_state["respiratory_referral_notes"] = record.get("Respiratory_referral_notes", "")
+
+    # Microbiology
+    st.session_state["bacterium_isolated"] = parse_bool(record.get("bacterium_isolated"))
+    bacterium = record.get("bacterium", "None isolated")
+    st.session_state["bacterium"] = bacterium if bacterium in BACTERIA_OPTIONS else "None isolated"
+    st.session_state["bacterium_other"] = record.get("bacterium_other", "")
+
+    # Outcome
+    resp_support = record.get("highest_respiratory_support", "None")
+    st.session_state["highest_respiratory_support"] = (
+        resp_support if resp_support in RESPIRATORY_SUPPORT_OPTIONS else "None"
+    )
+    st.session_state["picu_admission"] = parse_bool(record.get("picu_admission"))
+    st.session_state["developed_atelectasis"] = parse_bool(record.get("developed_atelectasis"))
+    st.session_state["death"] = parse_bool(record.get("death"))
+    st.session_state["readmitted"] = parse_bool(record.get("readmitted"))
+    st.session_state["weeks_to_readmission"] = parse_float(record.get("weeks_to_readmission"), 0.0)
+
+    readmission_reason = record.get("readmission_reason", "Unknown")
+    st.session_state["readmission_reason"] = (
+        readmission_reason if readmission_reason in READMISSION_REASON_OPTIONS else "Unknown"
+    )
+    st.session_state["readmission_reason_other"] = record.get("readmission_reason_other", "")
+    st.session_state["readmission_notes"] = record.get("readmission_notes", "")
+
+    st.session_state["editing_existing_id"] = record.get("Patient_ID", "")
+
+
+def handle_pending_load() -> None:
+    if not st.session_state.get("load_requested", False):
+        return
+
+    st.session_state["load_requested"] = False
+    target_id = st.session_state.get("patient_id", "").strip()
+
+    if not target_id:
+        st.session_state["load_message"] = ("warning", "Enter a Research ID first, then click Load.")
+        return
+
+    try:
+        record = find_existing_record(target_id)
+    except Exception as e:
+        st.session_state["load_message"] = ("error", f"Could not search the sheet: {e}")
+        return
+
+    if record:
+        apply_record_to_session_state(record)
+        st.session_state["load_message"] = (
+            "success",
+            f"Loaded existing record for Research ID '{target_id}'. Continue filling in the remaining fields below.",
+        )
+    else:
+        st.session_state["editing_existing_id"] = None
+        st.session_state["load_message"] = (
+            "info",
+            f"No existing record found for '{target_id}'. Starting a new entry — this ID hasn't been used yet.",
+        )
+
+
+def handle_new_record_request() -> None:
+    if st.session_state.get("new_record_requested", False):
+        st.session_state["new_record_requested"] = False
+        reset_form_state()
+        st.session_state["load_message"] = None
+
+
+# =========================
 # Session state helpers
 # =========================
 def initialise_state() -> None:
@@ -318,6 +547,10 @@ def initialise_state() -> None:
     defaults = {
         "patient_id": "",
         "reset_requested": False,
+        "load_requested": False,
+        "new_record_requested": False,
+        "editing_existing_id": None,
+        "load_message": None,
 
         "admission_month": MONTH_OPTIONS[now.month - 1],
         "admission_year": now.year,
@@ -425,7 +658,11 @@ def render_header() -> None:
     st.caption("No specific admission, discharge, date of birth, or intervention dates are collected.")
 
     if st.session_state.get("submitted"):
-        st.success("✅ Submitted successfully")
+        action = st.session_state.get("last_save_action", "created")
+        if action == "updated":
+            st.success("✅ Existing record updated successfully")
+        else:
+            st.success("✅ New record saved successfully")
         st.session_state["submitted"] = False
 
     st.markdown(
@@ -467,26 +704,53 @@ def render_patient_section():
     st.header("Patient Information")
 
     with st.container(border=True):
-        col1, col2, col3, col4 = st.columns(4)
+        id_col, load_col, new_col = st.columns([2, 1, 1])
 
-        with col1:
+        with id_col:
             patient_id = st.text_input("Research ID", key="patient_id")
 
-        with col2:
+        with load_col:
+            st.write("")
+            st.write("")
+            if st.button("🔎 Load Existing Record", use_container_width=True):
+                st.session_state["load_requested"] = True
+                st.rerun()
+
+        with new_col:
+            st.write("")
+            st.write("")
+            if st.button("🆕 Start New / Clear", use_container_width=True):
+                st.session_state["new_record_requested"] = True
+                st.rerun()
+
+        if st.session_state.get("load_message"):
+            level, message = st.session_state["load_message"]
+            getattr(st, level)(message)
+
+        if st.session_state.get("editing_existing_id"):
+            st.info(
+                f"📝 You are editing the existing record for Research ID "
+                f"'{st.session_state['editing_existing_id']}'. Submitting will update "
+                f"that record rather than create a new one."
+            )
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
             admission_month = st.selectbox(
                 "Admission Month",
                 options=MONTH_OPTIONS,
                 key="admission_month",
             )
 
-        with col3:
+        with col2:
             admission_year = st.selectbox(
                 "Admission Year",
                 options=YEAR_OPTIONS,
                 key="admission_year",
             )
 
-        with col4:
+        with col3:
             admission_time = st.time_input(
                 "Admission Time",
                 key="admission_time",
@@ -1165,33 +1429,67 @@ def normalise_value_for_sheet(value):
     return value
 
 
-def save_to_google_sheets(data_dict):
+def save_to_google_sheets(data_dict) -> str:
+    """Save a record. If a row already exists for this Patient_ID, update it in
+    place instead of appending a duplicate. Returns 'created' or 'updated'."""
     ws = get_sheet()
     headers = ws.row_values(1)
 
     if not headers:
-        headers = ["timestamp"] + list(data_dict.keys())
+        headers = ["timestamp", "last_updated"] + list(data_dict.keys())
         ws.append_row(headers)
-
     else:
         missing_headers = [key for key in data_dict.keys() if key not in headers]
 
         if "timestamp" not in headers:
             missing_headers = ["timestamp"] + missing_headers
 
+        if "last_updated" not in headers:
+            missing_headers = missing_headers + ["last_updated"]
+
         if missing_headers:
             headers = headers + missing_headers
             ws.update("1:1", [headers])
 
-    row = []
+    now_str = datetime.now().isoformat(sep=" ", timespec="minutes")
+    patient_id = str(data_dict.get("Patient_ID", "")).strip()
 
-    for h in headers:
+    existing_row_idx = None
+    existing_row_values = None
+
+    if patient_id and "Patient_ID" in headers:
+        col_idx = headers.index("Patient_ID") + 1
+        col_values = ws.col_values(col_idx)
+
+        for i, val in enumerate(col_values[1:], start=2):
+            if val.strip() == patient_id:
+                existing_row_idx = i
+                break
+
+    if existing_row_idx:
+        existing_row_values = ws.row_values(existing_row_idx)
+        existing_row_values += [""] * (len(headers) - len(existing_row_values))
+
+    row = []
+    for idx, h in enumerate(headers):
         if h == "timestamp":
-            row.append(datetime.now().isoformat(sep=" ", timespec="minutes"))
+            if existing_row_values and existing_row_values[idx]:
+                row.append(existing_row_values[idx])
+            else:
+                row.append(now_str)
+        elif h == "last_updated":
+            row.append(now_str)
         else:
             row.append(normalise_value_for_sheet(data_dict.get(h, "")))
 
+    if existing_row_idx:
+        start_a1 = gspread.utils.rowcol_to_a1(existing_row_idx, 1)
+        end_a1 = gspread.utils.rowcol_to_a1(existing_row_idx, len(headers))
+        ws.update(f"{start_a1}:{end_a1}", [row])
+        return "updated"
+
     ws.append_row(row)
+    return "created"
 
 
 # =========================
@@ -1205,6 +1503,8 @@ def main() -> None:
 
     initialise_state()
     handle_pending_reset()
+    handle_new_record_request()
+    handle_pending_load()
     render_header()
 
     (
@@ -1257,11 +1557,13 @@ def main() -> None:
                 )
 
                 try:
-                    save_to_google_sheets(record)
+                    action = save_to_google_sheets(record)
                     load_sheet_data.clear()
 
                     st.session_state["submitted"] = True
+                    st.session_state["last_save_action"] = action
                     st.session_state["reset_requested"] = True
+                    st.session_state["load_message"] = None
 
                     st.rerun()
 
