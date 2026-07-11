@@ -265,7 +265,6 @@ def reset_form_state() -> None:
     st.session_state["admission_time"] = now.time()
 
     st.session_state["discharge_day"] = 0
-    st.session_state["discharge_time"] = now.time()
 
     st.session_state["age_at_admission"] = 0
     st.session_state["sex"] = "Unknown"
@@ -378,18 +377,12 @@ def calculate_hours_from_admission(admission_time, event_day, event_time):
     return round(event_hours - admission_hours, 2)
 
 
-def calculate_length_of_stay(admission_time, discharge_day, discharge_time):
-    if admission_time is None or discharge_day is None or discharge_time is None:
+def calculate_length_of_stay(admission_time, discharge_day):
+    if admission_time is None or discharge_day is None:
         return None, None
 
-    admission_hours = time_to_hours(admission_time)
-    discharge_hours = discharge_day * 24 + time_to_hours(discharge_time)
-
-    if admission_hours is None or discharge_hours is None:
-        return None, None
-
-    los_hours = round(discharge_hours - admission_hours, 2)
-    los_days = round(los_hours / 24, 2)
+    los_days = discharge_day
+    los_hours = round(discharge_day * 24, 2)
 
     return los_hours, los_days
 
@@ -505,7 +498,6 @@ def apply_record_to_session_state(record: dict) -> None:
     st.session_state["admission_time"] = admission_time
 
     st.session_state["discharge_day"] = parse_int(record.get("Discharge_Day"), 0)
-    st.session_state["discharge_time"] = parse_time_value(record.get("Discharge_Time"), admission_time)
 
     st.session_state["age_at_admission"] = parse_int(record.get("age_at_admission"), 0)
 
@@ -703,7 +695,6 @@ def initialise_state() -> None:
         "admission_year": now.year,
         "admission_time": now.time(),
         "discharge_day": 0,
-        "discharge_time": now.time(),
 
         "age_at_admission": 0,
         "sex": "Unknown",
@@ -1009,25 +1000,16 @@ def render_patient_section():
 
         st.markdown("### Discharge")
 
-        dcol1, dcol2 = st.columns(2)
+        discharge_day = st.number_input(
+            "Discharge Day",
+            min_value=0,
+            max_value=365,
+            step=1,
+            key="discharge_day",
+            help="Day 0 = day of admission. Day 1 = next day.",
+        )
 
-        with dcol1:
-            discharge_day = st.number_input(
-                "Discharge Day",
-                min_value=0,
-                max_value=365,
-                step=1,
-                key="discharge_day",
-                help="Day 0 = day of admission. Day 1 = next day.",
-            )
-
-        with dcol2:
-            discharge_time = st.time_input(
-                "Discharge Time",
-                key="discharge_time",
-            )
-
-    return patient_id, admission_month, admission_year, admission_time, discharge_day, discharge_time
+    return patient_id, admission_month, admission_year, admission_time, discharge_day
 
 
 def render_admission_observations_section() -> dict:
@@ -1993,7 +1975,6 @@ def build_record(
     admission_year: int,
     admission_time,
     discharge_day: int,
-    discharge_time,
     background_values: dict,
     timed_sections: dict,
     microbiology_values: dict,
@@ -2003,7 +1984,6 @@ def build_record(
     los_hours, los_days = calculate_length_of_stay(
         admission_time,
         discharge_day,
-        discharge_time,
     )
 
     record = {
@@ -2012,7 +1992,6 @@ def build_record(
         "Admission_Year": admission_year,
         "Admission_Time": admission_time,
         "Discharge_Day": discharge_day,
-        "Discharge_Time": discharge_time,
         "Length_of_Stay_hours": los_hours,
         "Length_of_Stay_days": los_days,
     }
@@ -2212,7 +2191,6 @@ def main() -> None:
         admission_year,
         admission_time,
         discharge_day,
-        discharge_time,
     ) = render_patient_section()
 
     admission_obs_values = render_admission_observations_section()
@@ -2234,14 +2212,10 @@ def main() -> None:
             los_hours, _ = calculate_length_of_stay(
                 admission_time,
                 discharge_day,
-                discharge_time,
             )
 
             if los_hours is None:
-                st.error("Please enter discharge day and discharge time.")
-
-            elif los_hours < 0:
-                st.error("Discharge time cannot be before registration time.")
+                st.error("Please enter a discharge day.")
 
             else:
                 record = build_record(
@@ -2250,7 +2224,6 @@ def main() -> None:
                     admission_year,
                     admission_time,
                     discharge_day,
-                    discharge_time,
                     background_values,
                     timed_section_values,
                     microbiology_values,
