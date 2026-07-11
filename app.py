@@ -131,12 +131,12 @@ SECTIONS = {
         {"label": "Bronchodilators", "key": "bronchodilators"},
         {"label": "Simple Transfusion", "key": "simple_transfusion"},
         {"label": "Exchange Transfusion", "key": "exchange_transfusion"},
-        {"label": "Respiratory Physiotherapy", "key": "respiratory_pt"},
     ],
     "Discussions / Referrals": [
         {"label": "Discussion with Haematology", "key": "haematology_discussion"},
         {"label": "Discussion with ICU", "key": "icu_discussion"},
         {"label": "Respiratory Referral / Review", "key": "respiratory_referral"},
+        {"label": "Respiratory Physiotherapy", "key": "respiratory_pt"},
     ],
 }
 
@@ -660,7 +660,7 @@ def load_analgesia_entries_from_record(record: dict, admission_time) -> None:
         if drug and drug != "Not used":
             entries.append({
                 "drug": drug,
-                "dose_mg_per_kg": record.get(f"Analgesia_{i}_Dose_mg_per_kg", ""),
+                "dose": record.get(f"Analgesia_{i}_Dose", ""),
                 "other": record.get(f"Analgesia_{i}_Other", ""),
                 "day": record.get(f"Analgesia_{i}_Day"),
                 "time": record.get(f"Analgesia_{i}_Time"),
@@ -683,7 +683,7 @@ def load_analgesia_entries_from_record(record: dict, admission_time) -> None:
             drug if drug in ANALGESIA_OPTIONS else "Not used"
         )
         st.session_state[f"analgesia_entry_{entry_id}_dose"] = parse_float(
-            entry.get("dose_mg_per_kg"), 0.0
+            entry.get("dose"), 0.0
         )
         st.session_state[f"analgesia_entry_{entry_id}_other"] = entry.get("other", "")
         st.session_state[f"analgesia_entry_{entry_id}_day"] = parse_int(entry.get("day"), 0)
@@ -995,19 +995,34 @@ def render_analgesia_entry(entry_id: int, entry_number: int) -> dict:
             f"Entry {entry_number} drug",
             options=ANALGESIA_OPTIONS,
             key=f"analgesia_entry_{entry_id}_line",
+            on_change=lambda eid=entry_id: st.session_state.update(
+                {f"analgesia_entry_{eid}_dose": 0.0}
+            ),
         )
 
     not_used = analgesia_choice == "Not used"
+    is_ibuprofen = analgesia_choice == "Ibuprofen"
+    dose_unit = "mg" if is_ibuprofen else "mg/kg"
 
     with col2:
-        dose = st.number_input(
-            f"Entry {entry_number} dose, mg/kg",
-            min_value=0.0,
-            max_value=100.0,
-            step=0.1,
-            key=f"analgesia_entry_{entry_id}_dose",
-            disabled=not_used,
-        )
+        if is_ibuprofen:
+            dose = st.number_input(
+                f"Entry {entry_number} dose, mg",
+                min_value=0.0,
+                max_value=1000.0,
+                step=5.0,
+                key=f"analgesia_entry_{entry_id}_dose",
+                disabled=not_used,
+            )
+        else:
+            dose = st.number_input(
+                f"Entry {entry_number} dose, mg/kg",
+                min_value=0.0,
+                max_value=100.0,
+                step=0.1,
+                key=f"analgesia_entry_{entry_id}_dose",
+                disabled=not_used,
+            )
 
     with col3:
         day = st.number_input(
@@ -1041,7 +1056,8 @@ def render_analgesia_entry(entry_id: int, entry_number: int) -> dict:
 
     return {
         "drug": analgesia_choice,
-        "dose_mg_per_kg": "" if not_used else dose,
+        "dose": "" if not_used else dose,
+        "dose_unit": "" if not_used else dose_unit,
         "other": other,
         "day": None if not_used else day,
         "time": None if not_used else given_time,
@@ -1509,7 +1525,8 @@ def build_record(
                     if i <= len(raw_entries):
                         entry = raw_entries[i - 1]
                         drug = entry.get("drug", "Not used")
-                        dose = entry.get("dose_mg_per_kg", "")
+                        dose = entry.get("dose", "")
+                        dose_unit = entry.get("dose_unit", "")
                         other = entry.get("other", "")
                         day_val = entry.get("day")
                         time_val = entry.get("time")
@@ -1520,7 +1537,8 @@ def build_record(
                             hrs = None
 
                         record[f"Analgesia_{i}_Drug"] = drug
-                        record[f"Analgesia_{i}_Dose_mg_per_kg"] = dose
+                        record[f"Analgesia_{i}_Dose"] = dose
+                        record[f"Analgesia_{i}_Dose_Unit"] = dose_unit
                         record[f"Analgesia_{i}_Other"] = other
                         record[f"Analgesia_{i}_Day"] = day_val
                         record[f"Analgesia_{i}_Time"] = time_val
@@ -1532,7 +1550,8 @@ def build_record(
                                 used_hrs.append(hrs)
                     else:
                         record[f"Analgesia_{i}_Drug"] = ""
-                        record[f"Analgesia_{i}_Dose_mg_per_kg"] = ""
+                        record[f"Analgesia_{i}_Dose"] = ""
+                        record[f"Analgesia_{i}_Dose_Unit"] = ""
                         record[f"Analgesia_{i}_Other"] = ""
                         record[f"Analgesia_{i}_Day"] = None
                         record[f"Analgesia_{i}_Time"] = None
