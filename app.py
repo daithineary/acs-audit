@@ -252,6 +252,8 @@ def reset_form_state() -> None:
         st.session_state[f"analgesia_{line}_line"] = "Not used"
         st.session_state[f"analgesia_{line}_dose_mg_per_kg"] = 0.0
         st.session_state[f"analgesia_{line}_other"] = ""
+        st.session_state[f"analgesia_{line}_day"] = 0
+        st.session_state[f"analgesia_{line}_time"] = now.time()
 
     st.session_state["steroids_given"] = []
     st.session_state["steroids_other"] = ""
@@ -446,6 +448,10 @@ def apply_record_to_session_state(record: dict) -> None:
             record.get(f"Analgesia_{line}_dose_mg_per_kg"), 0.0
         )
         st.session_state[f"analgesia_{line}_other"] = record.get(f"Analgesia_{line}_other", "")
+        st.session_state[f"analgesia_{line}_day"] = parse_int(record.get(f"Analgesia_{line}_Day"), 0)
+        st.session_state[f"analgesia_{line}_time"] = parse_time_value(
+            record.get(f"Analgesia_{line}_Time"), admission_time
+        )
 
     # Steroids
     st.session_state["steroids_given"] = parse_multiselect(record.get("Steroids_given"), STEROID_OPTIONS)
@@ -582,12 +588,18 @@ def initialise_state() -> None:
         "analgesia_first_line": "Not used",
         "analgesia_first_dose_mg_per_kg": 0.0,
         "analgesia_first_other": "",
+        "analgesia_first_day": 0,
+        "analgesia_first_time": now.time(),
         "analgesia_second_line": "Not used",
         "analgesia_second_dose_mg_per_kg": 0.0,
         "analgesia_second_other": "",
+        "analgesia_second_day": 0,
+        "analgesia_second_time": now.time(),
         "analgesia_third_line": "Not used",
         "analgesia_third_dose_mg_per_kg": 0.0,
         "analgesia_third_other": "",
+        "analgesia_third_day": 0,
+        "analgesia_third_time": now.time(),
 
         "steroids_given": [],
         "steroids_other": "",
@@ -642,10 +654,12 @@ def sync_interventions_to_admission() -> None:
 
     for item in ALL_TIMED_ITEMS:
         key = item["key"]
+        st.session_state[f"{key}_day"] = 0
+        st.session_state[f"{key}_time"] = admission_time
 
-        if st.session_state.get(f"{key}_performed", False):
-            st.session_state[f"{key}_day"] = 0
-            st.session_state[f"{key}_time"] = admission_time
+    for line in ["first", "second", "third"]:
+        st.session_state[f"analgesia_{line}_day"] = 0
+        st.session_state[f"analgesia_{line}_time"] = admission_time
 
 
 # =========================
@@ -653,7 +667,7 @@ def sync_interventions_to_admission() -> None:
 # =========================
 def render_header() -> None:
     st.title(APP_TITLE)
-    st.caption("Record timings of key ACS interventions relative to admission time.")
+    st.caption("Record timings of key ACS interventions relative to registration time.")
     st.caption("No specific admission, discharge, date of birth, or intervention dates are collected.")
 
     if st.session_state.get("submitted"):
@@ -749,7 +763,7 @@ def render_patient_section():
 
         with col3:
             admission_time = st.time_input(
-                "Admission Time",
+                "Registration Time",
                 key="admission_time",
                 on_change=sync_interventions_to_admission,
             )
@@ -901,12 +915,18 @@ def empty_treatment_details(key: str) -> dict:
             "Analgesia_first_line": "",
             "Analgesia_first_dose_mg_per_kg": "",
             "Analgesia_first_other": "",
+            "Analgesia_first_Day": "",
+            "Analgesia_first_Time": "",
             "Analgesia_second_line": "",
             "Analgesia_second_dose_mg_per_kg": "",
             "Analgesia_second_other": "",
+            "Analgesia_second_Day": "",
+            "Analgesia_second_Time": "",
             "Analgesia_third_line": "",
             "Analgesia_third_dose_mg_per_kg": "",
             "Analgesia_third_other": "",
+            "Analgesia_third_Day": "",
+            "Analgesia_third_Time": "",
         }
 
     if key == "steroids":
@@ -939,7 +959,7 @@ def empty_treatment_details(key: str) -> dict:
 def render_analgesia_line(line_label: str, line_key: str) -> dict:
     st.markdown(f"##### {line_label}")
 
-    col1, col2 = st.columns([2, 1])
+    col1, col2, col3, col4 = st.columns([1.8, 1, 1, 1.2])
 
     with col1:
         analgesia_choice = st.selectbox(
@@ -948,8 +968,10 @@ def render_analgesia_line(line_label: str, line_key: str) -> dict:
             key=f"analgesia_{line_key}_line",
         )
 
+    not_used = analgesia_choice == "Not used"
+
     with col2:
-        if analgesia_choice == "Not used":
+        if not_used:
             dose = ""
             st.number_input(
                 f"{line_label} dose, mg/kg",
@@ -968,6 +990,24 @@ def render_analgesia_line(line_label: str, line_key: str) -> dict:
                 key=f"analgesia_{line_key}_dose_mg_per_kg",
             )
 
+    with col3:
+        day = st.number_input(
+            f"{line_label} day",
+            min_value=0,
+            max_value=365,
+            step=1,
+            key=f"analgesia_{line_key}_day",
+            disabled=not_used,
+            help="Day 0 = day of admission. Day 1 = next day.",
+        )
+
+    with col4:
+        given_time = st.time_input(
+            f"{line_label} time",
+            key=f"analgesia_{line_key}_time",
+            disabled=not_used,
+        )
+
     if analgesia_choice == "Other":
         other = st.text_input(
             f"Specify other {line_label.lower()} analgesia",
@@ -980,6 +1020,8 @@ def render_analgesia_line(line_label: str, line_key: str) -> dict:
         f"Analgesia_{line_key}_line": analgesia_choice,
         f"Analgesia_{line_key}_dose_mg_per_kg": dose,
         f"Analgesia_{line_key}_other": other,
+        f"Analgesia_{line_key}_Day": None if not_used else day,
+        f"Analgesia_{line_key}_Time": None if not_used else given_time,
     }
 
 
@@ -988,7 +1030,10 @@ def render_treatment_details(key: str) -> dict:
 
     if key == "analgesia":
         st.markdown("#### Analgesia details")
-        st.caption("Record the stepwise analgesia plan. Doses should be entered in mg/kg.")
+        st.caption(
+            "Record the stepwise analgesia plan. Doses should be entered in mg/kg. "
+            "Each line has its own day/time so escalation timing can be tracked separately."
+        )
 
         details.update(render_analgesia_line("First-line", "first"))
         details.update(render_analgesia_line("Second-line if required", "second"))
@@ -1110,8 +1155,13 @@ def render_treatment_details(key: str) -> dict:
 
 
 def render_timed_row(label: str, key: str) -> dict:
+    show_main_day_time = key != "analgesia"
+
     with st.container(border=True):
-        col1, col2, col3, col4 = st.columns([1.8, 1.1, 1.3, 1.1])
+        if show_main_day_time:
+            col1, col2, col3, col4 = st.columns([1.8, 1.1, 1.3, 1.1])
+        else:
+            col1, col2 = st.columns([1.8, 1.1])
 
         with col1:
             st.markdown(f"### {label}")
@@ -1119,25 +1169,30 @@ def render_timed_row(label: str, key: str) -> dict:
         with col2:
             performed = st.checkbox("Performed", key=f"{key}_performed")
 
-        with col3:
-            event_day = st.number_input(
-                "Day",
-                min_value=0,
-                max_value=365,
-                step=1,
-                key=f"{key}_day",
-                disabled=not performed,
-                label_visibility="collapsed",
-                help="Day 0 = day of admission. Day 1 = next day.",
-            )
+        if show_main_day_time:
+            with col3:
+                event_day = st.number_input(
+                    "Day",
+                    min_value=0,
+                    max_value=365,
+                    step=1,
+                    key=f"{key}_day",
+                    disabled=not performed,
+                    label_visibility="collapsed",
+                    help="Day 0 = day of admission. Day 1 = next day.",
+                )
 
-        with col4:
-            event_time = st.time_input(
-                "Time",
-                key=f"{key}_time",
-                disabled=not performed,
-                label_visibility="collapsed",
-            )
+            with col4:
+                event_time = st.time_input(
+                    "Time",
+                    key=f"{key}_time",
+                    disabled=not performed,
+                    label_visibility="collapsed",
+                )
+        else:
+            event_day = None
+            event_time = None
+            st.caption("Timing is recorded per analgesia line below (first/second/third-line).")
 
         details = empty_treatment_details(key)
 
@@ -1404,6 +1459,18 @@ def build_record(
                 else:
                     record[detail_key] = detail_value
 
+            if label == "Analgesia":
+                for line in ["first", "second", "third"]:
+                    day_val = record.get(f"Analgesia_{line}_Day")
+                    time_val = record.get(f"Analgesia_{line}_Time")
+
+                    if isinstance(day_val, int) and isinstance(time_val, time):
+                        record[f"Analgesia_{line}_Time_hrs"] = calculate_hours_from_admission(
+                            admission_time, day_val, time_val
+                        )
+                    else:
+                        record[f"Analgesia_{line}_Time_hrs"] = None
+
     record.update(microbiology_values)
     record.update(outcome_values)
 
@@ -1536,7 +1603,7 @@ def main() -> None:
                 st.error("Please enter discharge day and discharge time.")
 
             elif los_hours < 0:
-                st.error("Discharge time cannot be before admission time.")
+                st.error("Discharge time cannot be before registration time.")
 
             else:
                 record = build_record(
