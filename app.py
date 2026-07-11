@@ -667,7 +667,6 @@ def sync_interventions_to_admission() -> None:
 # =========================
 def render_header() -> None:
     st.title(APP_TITLE)
-    st.caption("Record timings of key ACS interventions relative to registration time.")
     st.caption("No specific admission, discharge, date of birth, or intervention dates are collected.")
 
     if st.session_state.get("submitted"):
@@ -724,7 +723,6 @@ def render_patient_section():
                 "Research ID",
                 key="patient_id",
                 on_change=on_patient_id_change,
-                help="Press Enter or Tab after typing an ID to automatically load an existing record, if one exists.",
             )
 
         with new_col:
@@ -1030,10 +1028,6 @@ def render_treatment_details(key: str) -> dict:
 
     if key == "analgesia":
         st.markdown("#### Analgesia details")
-        st.caption(
-            "Record the stepwise analgesia plan. Doses should be entered in mg/kg. "
-            "Each line has its own day/time so escalation timing can be tracked separately."
-        )
 
         details.update(render_analgesia_line("First-line", "first"))
         details.update(render_analgesia_line("Second-line if required", "second"))
@@ -1041,7 +1035,6 @@ def render_treatment_details(key: str) -> dict:
 
     elif key == "steroids":
         st.markdown("#### Steroid details")
-        st.caption("Record steroid doses in mg/kg.")
 
         col1, col2 = st.columns(2)
 
@@ -1109,8 +1102,6 @@ def render_treatment_details(key: str) -> dict:
 
     elif key == "antibiotics":
         st.markdown("#### Antibiotic details")
-        st.caption("Record antibiotic doses in mg/kg. Use the notes box if multiple agents had different doses.")
-
         details["Antibiotics_given"] = st.multiselect(
             "Antibiotics given",
             options=ANTIBIOTIC_OPTIONS,
@@ -1192,7 +1183,6 @@ def render_timed_row(label: str, key: str) -> dict:
         else:
             event_day = None
             event_time = None
-            st.caption("Timing is recorded per analgesia line below (first/second/third-line).")
 
         details = empty_treatment_details(key)
 
@@ -1224,8 +1214,6 @@ def render_timed_section(section_name: str, items: list) -> dict:
     values = {}
 
     if section_name == "Treatment":
-        st.caption("Tick 'Performed' to open the day/time fields and any treatment-specific details.")
-
         left_keys = {"analgesia", "steroids", "antibiotics"}
         left_items = [item for item in items if item["key"] in left_keys]
         right_items = [item for item in items if item["key"] not in left_keys]
