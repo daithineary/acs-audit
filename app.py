@@ -36,12 +36,15 @@ ANALGESIA_OPTIONS = [
     "Oral morphine",
     "IV morphine",
     "Subcutaneous morphine",
+    "Intranasal Fentanyl (INF)",
     "Oxycodone",
     "Fentanyl",
     "Morphine PCA",
     "Ketamine",
     "Other",
 ]
+
+MAX_ANALGESIA_ENTRIES = 8
 
 READMISSION_REASON_OPTIONS = [
     "Pain crisis / vaso-occlusive crisis",
@@ -248,12 +251,7 @@ def reset_form_state() -> None:
         st.session_state[f"{key}_time"] = now.time()
         st.session_state[f"{key}_performed"] = False
 
-    for line in ["first", "second", "third"]:
-        st.session_state[f"analgesia_{line}_line"] = "Not used"
-        st.session_state[f"analgesia_{line}_dose_mg_per_kg"] = 0.0
-        st.session_state[f"analgesia_{line}_other"] = ""
-        st.session_state[f"analgesia_{line}_day"] = 0
-        st.session_state[f"analgesia_{line}_time"] = now.time()
+    reset_analgesia_entries(now.time())
 
     st.session_state["steroids_given"] = []
     st.session_state["steroids_other"] = ""
@@ -439,19 +437,7 @@ def apply_record_to_session_state(record: dict) -> None:
             )
 
     # Analgesia
-    for line in ["first", "second", "third"]:
-        line_val = record.get(f"Analgesia_{line}_line", "Not used")
-        st.session_state[f"analgesia_{line}_line"] = (
-            line_val if line_val in ANALGESIA_OPTIONS else "Not used"
-        )
-        st.session_state[f"analgesia_{line}_dose_mg_per_kg"] = parse_float(
-            record.get(f"Analgesia_{line}_dose_mg_per_kg"), 0.0
-        )
-        st.session_state[f"analgesia_{line}_other"] = record.get(f"Analgesia_{line}_other", "")
-        st.session_state[f"analgesia_{line}_day"] = parse_int(record.get(f"Analgesia_{line}_Day"), 0)
-        st.session_state[f"analgesia_{line}_time"] = parse_time_value(
-            record.get(f"Analgesia_{line}_Time"), admission_time
-        )
+    load_analgesia_entries_from_record(record, admission_time)
 
     # Steroids
     st.session_state["steroids_given"] = parse_multiselect(record.get("Steroids_given"), STEROID_OPTIONS)
@@ -585,22 +571,6 @@ def initialise_state() -> None:
         "regular_exchange_transfusion_programme": False,
         "background_notes": "",
 
-        "analgesia_first_line": "Not used",
-        "analgesia_first_dose_mg_per_kg": 0.0,
-        "analgesia_first_other": "",
-        "analgesia_first_day": 0,
-        "analgesia_first_time": now.time(),
-        "analgesia_second_line": "Not used",
-        "analgesia_second_dose_mg_per_kg": 0.0,
-        "analgesia_second_other": "",
-        "analgesia_second_day": 0,
-        "analgesia_second_time": now.time(),
-        "analgesia_third_line": "Not used",
-        "analgesia_third_dose_mg_per_kg": 0.0,
-        "analgesia_third_other": "",
-        "analgesia_third_day": 0,
-        "analgesia_third_time": now.time(),
-
         "steroids_given": [],
         "steroids_other": "",
         "steroid_max_dose_mg_per_kg": 0.0,
@@ -648,6 +618,82 @@ def initialise_state() -> None:
         if f"{key}_performed" not in st.session_state:
             st.session_state[f"{key}_performed"] = False
 
+    ensure_analgesia_entries_initialised()
+
+
+def init_analgesia_entry_defaults(entry_id: int, entry_time=None) -> None:
+    fallback_time = entry_time or st.session_state.get("admission_time", datetime.now().time())
+    st.session_state[f"analgesia_entry_{entry_id}_line"] = "Not used"
+    st.session_state[f"analgesia_entry_{entry_id}_dose"] = 0.0
+    st.session_state[f"analgesia_entry_{entry_id}_other"] = ""
+    st.session_state[f"analgesia_entry_{entry_id}_day"] = 0
+    st.session_state[f"analgesia_entry_{entry_id}_time"] = fallback_time
+
+
+def ensure_analgesia_entries_initialised() -> None:
+    if "analgesia_entry_ids" not in st.session_state:
+        st.session_state["analgesia_entry_ids"] = [1]
+        st.session_state["analgesia_next_id"] = 2
+        init_analgesia_entry_defaults(1)
+
+
+def reset_analgesia_entries(default_time) -> None:
+    st.session_state["analgesia_entry_ids"] = [1]
+    st.session_state["analgesia_next_id"] = 2
+    init_analgesia_entry_defaults(1, default_time)
+
+
+def add_analgesia_entry() -> None:
+    if len(st.session_state["analgesia_entry_ids"]) >= MAX_ANALGESIA_ENTRIES:
+        return
+    new_id = st.session_state["analgesia_next_id"]
+    st.session_state["analgesia_entry_ids"].append(new_id)
+    st.session_state["analgesia_next_id"] += 1
+    init_analgesia_entry_defaults(new_id)
+
+
+def load_analgesia_entries_from_record(record: dict, admission_time) -> None:
+    entries = []
+
+    for i in range(1, MAX_ANALGESIA_ENTRIES + 1):
+        drug = record.get(f"Analgesia_{i}_Drug", "")
+        if drug and drug != "Not used":
+            entries.append({
+                "drug": drug,
+                "dose_mg_per_kg": record.get(f"Analgesia_{i}_Dose_mg_per_kg", ""),
+                "other": record.get(f"Analgesia_{i}_Other", ""),
+                "day": record.get(f"Analgesia_{i}_Day"),
+                "time": record.get(f"Analgesia_{i}_Time"),
+            })
+
+    if not entries:
+        reset_analgesia_entries(admission_time)
+        return
+
+    ids = []
+    next_id = 1
+
+    for entry in entries:
+        entry_id = next_id
+        ids.append(entry_id)
+        next_id += 1
+
+        drug = entry.get("drug", "Not used")
+        st.session_state[f"analgesia_entry_{entry_id}_line"] = (
+            drug if drug in ANALGESIA_OPTIONS else "Not used"
+        )
+        st.session_state[f"analgesia_entry_{entry_id}_dose"] = parse_float(
+            entry.get("dose_mg_per_kg"), 0.0
+        )
+        st.session_state[f"analgesia_entry_{entry_id}_other"] = entry.get("other", "")
+        st.session_state[f"analgesia_entry_{entry_id}_day"] = parse_int(entry.get("day"), 0)
+        st.session_state[f"analgesia_entry_{entry_id}_time"] = parse_time_value(
+            entry.get("time"), admission_time
+        )
+
+    st.session_state["analgesia_entry_ids"] = ids
+    st.session_state["analgesia_next_id"] = next_id
+
 
 def sync_interventions_to_admission() -> None:
     admission_time = st.session_state["admission_time"]
@@ -657,9 +703,10 @@ def sync_interventions_to_admission() -> None:
         st.session_state[f"{key}_day"] = 0
         st.session_state[f"{key}_time"] = admission_time
 
-    for line in ["first", "second", "third"]:
-        st.session_state[f"analgesia_{line}_day"] = 0
-        st.session_state[f"analgesia_{line}_time"] = admission_time
+    ensure_analgesia_entries_initialised()
+    for entry_id in st.session_state["analgesia_entry_ids"]:
+        st.session_state[f"analgesia_entry_{entry_id}_day"] = 0
+        st.session_state[f"analgesia_entry_{entry_id}_time"] = admission_time
 
 
 # =========================
@@ -910,21 +957,7 @@ def render_background_section() -> dict:
 def empty_treatment_details(key: str) -> dict:
     if key == "analgesia":
         return {
-            "Analgesia_first_line": "",
-            "Analgesia_first_dose_mg_per_kg": "",
-            "Analgesia_first_other": "",
-            "Analgesia_first_Day": "",
-            "Analgesia_first_Time": "",
-            "Analgesia_second_line": "",
-            "Analgesia_second_dose_mg_per_kg": "",
-            "Analgesia_second_other": "",
-            "Analgesia_second_Day": "",
-            "Analgesia_second_Time": "",
-            "Analgesia_third_line": "",
-            "Analgesia_third_dose_mg_per_kg": "",
-            "Analgesia_third_other": "",
-            "Analgesia_third_Day": "",
-            "Analgesia_third_Time": "",
+            "Analgesia_Entries": [],
         }
 
     if key == "steroids":
@@ -954,73 +987,93 @@ def empty_treatment_details(key: str) -> dict:
     return {}
 
 
-def render_analgesia_line(line_label: str, line_key: str) -> dict:
-    st.markdown(f"##### {line_label}")
-
-    col1, col2, col3, col4 = st.columns([1.8, 1, 1, 1.2])
+def render_analgesia_entry(entry_id: int, entry_number: int) -> dict:
+    col1, col2, col3, col4, col5 = st.columns([1.8, 1, 1, 1.2, 0.6])
 
     with col1:
         analgesia_choice = st.selectbox(
-            f"{line_label} analgesia",
+            f"Entry {entry_number} drug",
             options=ANALGESIA_OPTIONS,
-            key=f"analgesia_{line_key}_line",
+            key=f"analgesia_entry_{entry_id}_line",
         )
 
     not_used = analgesia_choice == "Not used"
 
     with col2:
-        if not_used:
-            dose = ""
-            st.number_input(
-                f"{line_label} dose, mg/kg",
-                min_value=0.0,
-                max_value=100.0,
-                step=0.1,
-                key=f"analgesia_{line_key}_dose_mg_per_kg",
-                disabled=True,
-            )
-        else:
-            dose = st.number_input(
-                f"{line_label} dose, mg/kg",
-                min_value=0.0,
-                max_value=100.0,
-                step=0.1,
-                key=f"analgesia_{line_key}_dose_mg_per_kg",
-            )
+        dose = st.number_input(
+            f"Entry {entry_number} dose, mg/kg",
+            min_value=0.0,
+            max_value=100.0,
+            step=0.1,
+            key=f"analgesia_entry_{entry_id}_dose",
+            disabled=not_used,
+        )
 
     with col3:
         day = st.number_input(
-            f"{line_label} day",
+            f"Entry {entry_number} day",
             min_value=0,
             max_value=365,
             step=1,
-            key=f"analgesia_{line_key}_day",
+            key=f"analgesia_entry_{entry_id}_day",
             disabled=not_used,
-            help="Day 0 = day of admission. Day 1 = next day.",
         )
 
     with col4:
         given_time = st.time_input(
-            f"{line_label} time",
-            key=f"analgesia_{line_key}_time",
+            f"Entry {entry_number} time",
+            key=f"analgesia_entry_{entry_id}_time",
             disabled=not_used,
         )
 
+    with col5:
+        st.write("")
+        st.write("")
+        remove_clicked = st.button("🗑️", key=f"analgesia_entry_{entry_id}_remove")
+
     if analgesia_choice == "Other":
         other = st.text_input(
-            f"Specify other {line_label.lower()} analgesia",
-            key=f"analgesia_{line_key}_other",
+            f"Specify other drug for entry {entry_number}",
+            key=f"analgesia_entry_{entry_id}_other",
         )
     else:
         other = ""
 
     return {
-        f"Analgesia_{line_key}_line": analgesia_choice,
-        f"Analgesia_{line_key}_dose_mg_per_kg": dose,
-        f"Analgesia_{line_key}_other": other,
-        f"Analgesia_{line_key}_Day": None if not_used else day,
-        f"Analgesia_{line_key}_Time": None if not_used else given_time,
+        "drug": analgesia_choice,
+        "dose_mg_per_kg": "" if not_used else dose,
+        "other": other,
+        "day": None if not_used else day,
+        "time": None if not_used else given_time,
+        "remove_clicked": remove_clicked,
     }
+
+
+def render_analgesia_entries() -> list:
+    ensure_analgesia_entries_initialised()
+
+    entries = []
+    remove_id = None
+
+    for idx, entry_id in enumerate(st.session_state["analgesia_entry_ids"], start=1):
+        entry = render_analgesia_entry(entry_id, idx)
+        entries.append(entry)
+
+        if entry["remove_clicked"]:
+            remove_id = entry_id
+
+    if remove_id is not None and len(st.session_state["analgesia_entry_ids"]) > 1:
+        st.session_state["analgesia_entry_ids"].remove(remove_id)
+        st.rerun()
+
+    if len(st.session_state["analgesia_entry_ids"]) < MAX_ANALGESIA_ENTRIES:
+        if st.button("➕ Add analgesia entry", key="add_analgesia_entry_btn"):
+            add_analgesia_entry()
+            st.rerun()
+    else:
+        st.caption(f"Maximum of {MAX_ANALGESIA_ENTRIES} analgesia entries reached.")
+
+    return entries
 
 
 def render_treatment_details(key: str) -> dict:
@@ -1029,9 +1082,7 @@ def render_treatment_details(key: str) -> dict:
     if key == "analgesia":
         st.markdown("#### Analgesia details")
 
-        details.update(render_analgesia_line("First-line", "first"))
-        details.update(render_analgesia_line("Second-line if required", "second"))
-        details.update(render_analgesia_line("Third-line if required", "third"))
+        details["Analgesia_Entries"] = render_analgesia_entries()
 
     elif key == "steroids":
         st.markdown("#### Steroid details")
@@ -1442,22 +1493,54 @@ def build_record(
                 record[f"{safe_label}_Time_hrs"] = hours
 
             for detail_key, detail_value in values.get("details", {}).items():
-                if isinstance(detail_value, list):
+                if detail_key == "Analgesia_Entries":
+                    continue
+                elif isinstance(detail_value, list):
                     record[detail_key] = serialise_multiselect(detail_value)
                 else:
                     record[detail_key] = detail_value
 
             if label == "Analgesia":
-                for line in ["first", "second", "third"]:
-                    day_val = record.get(f"Analgesia_{line}_Day")
-                    time_val = record.get(f"Analgesia_{line}_Time")
+                raw_entries = values.get("details", {}).get("Analgesia_Entries", [])
+                used_drugs = []
+                used_hrs = []
 
-                    if isinstance(day_val, int) and isinstance(time_val, time):
-                        record[f"Analgesia_{line}_Time_hrs"] = calculate_hours_from_admission(
-                            admission_time, day_val, time_val
-                        )
+                for i in range(1, MAX_ANALGESIA_ENTRIES + 1):
+                    if i <= len(raw_entries):
+                        entry = raw_entries[i - 1]
+                        drug = entry.get("drug", "Not used")
+                        dose = entry.get("dose_mg_per_kg", "")
+                        other = entry.get("other", "")
+                        day_val = entry.get("day")
+                        time_val = entry.get("time")
+
+                        if isinstance(day_val, int) and isinstance(time_val, time):
+                            hrs = calculate_hours_from_admission(admission_time, day_val, time_val)
+                        else:
+                            hrs = None
+
+                        record[f"Analgesia_{i}_Drug"] = drug
+                        record[f"Analgesia_{i}_Dose_mg_per_kg"] = dose
+                        record[f"Analgesia_{i}_Other"] = other
+                        record[f"Analgesia_{i}_Day"] = day_val
+                        record[f"Analgesia_{i}_Time"] = time_val
+                        record[f"Analgesia_{i}_Time_hrs"] = hrs
+
+                        if drug and drug != "Not used":
+                            used_drugs.append(drug)
+                            if hrs is not None:
+                                used_hrs.append(hrs)
                     else:
-                        record[f"Analgesia_{line}_Time_hrs"] = None
+                        record[f"Analgesia_{i}_Drug"] = ""
+                        record[f"Analgesia_{i}_Dose_mg_per_kg"] = ""
+                        record[f"Analgesia_{i}_Other"] = ""
+                        record[f"Analgesia_{i}_Day"] = None
+                        record[f"Analgesia_{i}_Time"] = None
+                        record[f"Analgesia_{i}_Time_hrs"] = None
+
+                record["Analgesia_Entry_Count"] = len(used_drugs)
+                record["Analgesia_Drugs_Used"] = "; ".join(used_drugs)
+                record["Analgesia_Time_to_First_hrs"] = min(used_hrs) if used_hrs else None
 
     record.update(microbiology_values)
     record.update(outcome_values)
