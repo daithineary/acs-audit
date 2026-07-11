@@ -316,6 +316,11 @@ def reset_form_state() -> None:
     st.session_state["post_exchange_hbs_percent"] = None
     st.session_state["exchange_volume_ml_per_kg"] = None
 
+    st.session_state["iv_fluids_percent_maintenance"] = None
+
+    st.session_state["bronchodilator_drug"] = "Salbutamol"
+    st.session_state["bronchodilator_other"] = ""
+
     st.session_state["temperature_at_admission"] = None
     st.session_state["respiratory_rate_at_admission"] = None
     st.session_state["o2_sats_at_admission"] = None
@@ -593,6 +598,16 @@ def apply_record_to_session_state(record: dict) -> None:
     st.session_state["post_exchange_hbs_percent"] = _load_optional_float("Post_Exchange_HbS_Percent")
     st.session_state["exchange_volume_ml_per_kg"] = _load_optional_float("Exchange_Volume_mL_per_kg")
 
+    # Fluids
+    st.session_state["iv_fluids_percent_maintenance"] = _load_optional_int("IV_Fluids_Percent_Maintenance")
+
+    # Bronchodilators
+    bronchodilator_drug = record.get("Bronchodilator_Drug", "Salbutamol")
+    st.session_state["bronchodilator_drug"] = (
+        bronchodilator_drug if bronchodilator_drug in ["Salbutamol", "Other"] else "Salbutamol"
+    )
+    st.session_state["bronchodilator_other"] = record.get("Bronchodilator_Other", "")
+
     # Admission observations
     st.session_state["temperature_at_admission"] = _load_optional_float("temperature_at_admission")
     st.session_state["respiratory_rate_at_admission"] = _load_optional_int("respiratory_rate_at_admission")
@@ -744,6 +759,11 @@ def initialise_state() -> None:
         "pre_exchange_hb": None,
         "post_exchange_hbs_percent": None,
         "exchange_volume_ml_per_kg": None,
+
+        "iv_fluids_percent_maintenance": None,
+
+        "bronchodilator_drug": "Salbutamol",
+        "bronchodilator_other": "",
 
         "temperature_at_admission": None,
         "respiratory_rate_at_admission": None,
@@ -1263,6 +1283,17 @@ def empty_treatment_details(key: str) -> dict:
             "Exchange_Volume_mL_per_kg": "",
         }
 
+    if key == "fluids":
+        return {
+            "IV_Fluids_Percent_Maintenance": "",
+        }
+
+    if key == "bronchodilators":
+        return {
+            "Bronchodilator_Drug": "",
+            "Bronchodilator_Other": "",
+        }
+
     return {}
 
 
@@ -1644,6 +1675,36 @@ def render_treatment_details(key: str) -> dict:
                 key="exchange_volume_ml_per_kg",
             )
 
+    elif key == "fluids":
+        st.markdown("#### Fluids details")
+        st.caption("Guideline: do not exceed 80% of maintenance via supplemental IV fluids.")
+
+        details["IV_Fluids_Percent_Maintenance"] = st.number_input(
+            "IV fluids given, % of maintenance",
+            min_value=0,
+            max_value=150,
+            step=5,
+            key="iv_fluids_percent_maintenance",
+        )
+
+    elif key == "bronchodilators":
+        st.markdown("#### Bronchodilator details")
+
+        bronchodilator_choice = st.selectbox(
+            "Bronchodilator drug",
+            options=["Salbutamol", "Other"],
+            key="bronchodilator_drug",
+        )
+        details["Bronchodilator_Drug"] = bronchodilator_choice
+
+        if bronchodilator_choice == "Other":
+            details["Bronchodilator_Other"] = st.text_input(
+                "Specify other bronchodilator",
+                key="bronchodilator_other",
+            )
+        else:
+            details["Bronchodilator_Other"] = ""
+
     return details
 
 
@@ -1694,6 +1755,7 @@ def render_timed_row(label: str, key: str) -> dict:
             "analgesia", "steroids", "antibiotics", "respiratory_referral",
             "cxr", "bloods", "cultures", "antivirals",
             "simple_transfusion", "exchange_transfusion",
+            "fluids", "bronchodilators",
         }:
             st.divider()
             details = render_treatment_details(key)
